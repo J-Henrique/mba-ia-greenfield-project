@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="plannotator-theme" content="host">
+<title>StreamTube — Fase 03: Upload e Processamento de Vídeos</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%236a0dad'/%3E%3Cpolygon points='24,18 24,46 44,34' fill='%23e2e8f0'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --background: oklch(0.97 0.005 260);
+    --foreground: oklch(0.18 0.02 260);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.18 0.02 260);
+    --muted: oklch(0.92 0.01 260);
+    --muted-foreground: oklch(0.40 0.02 260);
+    --primary: oklch(0.50 0.25 280);
+    --primary-foreground: oklch(1 0 0);
+    --secondary: oklch(0.50 0.18 180);
+    --accent: oklch(0.60 0.22 50);
+    --accent-foreground: oklch(0.18 0.02 260);
+    --destructive: oklch(0.50 0.25 25);
+    --success: oklch(0.45 0.20 150);
+    --warning: oklch(0.55 0.18 85);
+    --border: oklch(0.88 0.01 260);
+    --code-bg: oklch(0.92 0.01 260);
+    --ring: oklch(0.50 0.25 280);
+    --radius: 0.625rem;
+    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    --font-display: Georgia, 'Times New Roman', serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--background);
+    color: var(--foreground);
+    line-height: 1.6;
+    padding: 0;
+  }
+
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+  }
+
+  /* Hero */
+  .hero {
+    text-align: center;
+    padding: 3rem 0 2rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2.5rem;
+  }
+
+  .hero .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted-foreground);
+    margin-bottom: 0.75rem;
+  }
+
+  .hero h1 {
+    font-family: var(--font-display);
+    font-size: 2.5rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin-bottom: 0.75rem;
+  }
+
+  .hero h1 span { color: var(--primary); }
+
+  .hero p {
+    font-size: 1.1rem;
+    color: var(--muted-foreground);
+    max-width: 650px;
+    margin: 0 auto 1.5rem;
+  }
+
+  /* KPI strip */
+  .kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0 2.5rem;
+  }
+
+  .kpi-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    text-align: center;
+  }
+
+  .kpi-card .number {
+    font-family: var(--font-mono);
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--primary);
+    display: block;
+  }
+
+  .kpi-card .label {
+    font-size: 0.8rem;
+    color: var(--muted-foreground);
+    margin-top: 0.25rem;
+  }
+
+  /* Section */
+  .section {
+    margin-bottom: 3rem;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border);
+  }
+
+  .section-header .step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .section-header h2 {
+    font-family: var(--font-display);
+    font-size: 1.4rem;
+    font-weight: 700;
+  }
+
+  .section-header .tag {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-weight: 600;
+    margin-left: auto;
+  }
+
+  .tag-new { background: var(--success); color: #fff; }
+  .tag-existing { background: var(--muted); color: var(--muted-foreground); }
+  .tag-warning { background: var(--warning); color: #000; }
+
+  /* Cards */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+  }
+
+  .card h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .card p, .card li {
+    font-size: 0.875rem;
+    color: var(--muted-foreground);
+    line-height: 1.6;
+  }
+
+  .card ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .card li {
+    padding: 0.3rem 0;
+    padding-left: 1.25rem;
+    position: relative;
+  }
+
+  .card li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: var(--primary);
+    font-weight: 700;
+  }
+
+  /* Mermaid container */
+  .diagram-container {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin: 1rem 0;
+    overflow-x: auto;
+  }
+
+  .diagram-container .mermaid {
+    text-align: center;
+  }
+
+  /* Callout */
+  .callout {
+    background: var(--code-bg);
+    border-left: 4px solid var(--primary);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    margin: 1rem 0;
+    font-size: 0.875rem;
+  }
+
+  .callout.warning {
+    border-left-color: var(--warning);
+    background: oklch(0.95 0.05 85 / 0.3);
+  }
+
+  .callout.success {
+    border-left-color: var(--success);
+    background: oklch(0.95 0.05 150 / 0.2);
+  }
+
+  .callout.destructive {
+    border-left-color: var(--destructive);
+    background: oklch(0.95 0.05 25 / 0.15);
+  }
+
+  .callout strong { color: var(--foreground); }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    margin: 1rem 0;
+    padding: 0.75rem 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--muted-foreground);
+  }
+
+  .legend-item .swatch {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 4px;
+  }
+
+  /* Pipeline step */
+  .pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 1.5rem 0;
+  }
+
+  .pipe-step {
+    flex: 1;
+    min-width: 140px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    text-align: center;
+    position: relative;
+  }
+
+  .pipe-step .emoji { font-size: 1.5rem; display: block; margin-bottom: 0.4rem; }
+  .pipe-step .pipe-label { font-size: 0.8rem; font-weight: 600; }
+  .pipe-step .pipe-desc { font-size: 0.7rem; color: var(--muted-foreground); margin-top: 0.25rem; }
+
+  .pipe-arrow {
+    display: flex;
+    align-items: center;
+    font-size: 1.2rem;
+    color: var(--muted-foreground);
+    padding: 0 0.25rem;
+  }
+
+  /* Timeline */
+  .timeline {
+    position: relative;
+    padding-left: 2rem;
+    margin: 1.5rem 0;
+  }
+
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 0.5rem;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--border);
+  }
+
+  .tl-item {
+    position: relative;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  .tl-item::before {
+    content: attr(data-num);
+    position: absolute;
+    left: -1.6rem;
+    top: 1rem;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 50%;
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    z-index: 1;
+  }
+
+  .tl-item .tl-title { font-weight: 600; font-size: 0.9rem; }
+  .tl-item .tl-desc { font-size: 0.8rem; color: var(--muted-foreground); margin-top: 0.25rem; }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    padding: 2rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted-foreground);
+    font-size: 0.8rem;
+  }
+
+  /* Responsive */
+  @media (max-width: 640px) {
+    .hero h1 { font-size: 1.8rem; }
+    .kpi-strip { grid-template-columns: repeat(2, 1fr); }
+    .card-grid { grid-template-columns: 1fr; }
+    .pipeline { flex-direction: column; }
+    .pipe-arrow { transform: rotate(90deg); }
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: oklch(0.15 0.02 260);
+      --foreground: oklch(0.90 0.01 260);
+      --card: oklch(0.20 0.02 260);
+      --card-foreground: oklch(0.90 0.01 260);
+      --muted: oklch(0.25 0.02 260);
+      --muted-foreground: oklch(0.60 0.02 260);
+      --primary: oklch(0.65 0.25 280);
+      --primary-foreground: oklch(0.15 0.02 260);
+      --border: oklch(0.28 0.02 260);
+      --code-bg: oklch(0.22 0.02 260);
+    }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="eyebrow">StreamTube · Fase 03</div>
+    <h1>Upload e Processamento de <span>Vídeos</span></h1>
+    <p>Como enviar vídeos de até <strong>10GB</strong> sem travar o sistema, processá-los automaticamente com <strong>FFmpeg</strong>, e disponibilizar <strong>streaming</strong> e <strong>download</strong> — tudo sem sobrecarregar a API.</p>
+  </div>
+
+  <!-- KPI Strip -->
+  <div class="kpi-strip">
+    <div class="kpi-card"><span class="number">10GB</span><span class="label">Upload máximo</span></div>
+    <div class="kpi-card"><span class="number">5</span><span class="label">Serviços no Docker</span></div>
+    <div class="kpi-card"><span class="number">3</span><span class="label">Etapas do pipeline</span></div>
+    <div class="kpi-card"><span class="number">4</span><span class="label">Estados do vídeo</span></div>
+    <div class="kpi-card"><span class="number">0</span><span class="label">Bytes passando pela API</span></div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <span class="legend-item"><span class="swatch" style="background:var(--warning)"></span> Novo nesta fase</span>
+    <span class="legend-item"><span class="swatch" style="background:var(--muted)"></span> Já existente</span>
+    <span class="legend-item"><span class="swatch" style="background:var(--primary)"></span> Fluxo de dados</span>
+    <span class="legend-item"><span class="swatch" style="background:var(--secondary)"></span> Infraestrutura</span>
+  </div>
+
+  <!-- Section 1: Architecture Overview -->
+  <div class="section">
+    <div class="section-header">
+      <span class="step">1</span>
+      <h2>Visão Geral da Arquitetura</h2>
+    </div>
+
+    <p style="margin-bottom:1rem;font-size:0.9rem;color:var(--muted-foreground);">
+      A Fase 03 adiciona <strong>3 novos containers</strong> ao Docker Compose: <strong>MinIO</strong> (storage), <strong>Redis</strong> (fila) e <strong>Video Worker</strong> (FFmpeg). O fluxo inteiro foi desenhado para que a <strong>API nunca precise tocar nos arquivos de vídeo</strong>.
+    </p>
+
+    <div class="diagram-container">
+      <div class="mermaid">
+flowchart TB
+    subgraph CLIENT["Cliente / Frontend"]
+        A[("App/Browser")]
+    end
+
+    subgraph API["API NestJS (existente)"]
+        B["Auth + Channels<br/><span style='font-size:10px'>Já existe</span>"]
+        C["Videos API<br/><span style='font-size:10px'>Novo endpoint</span>"]
+    end
+
+    subgraph INFRA["🧱 Infraestrutura Nova"]
+        direction TB
+        D["🗄️ MinIO<br/><span style='font-size:10px'>Object Storage</span>"]
+        E["📨 Redis<br/><span style='font-size:10px'>BullMQ Queue</span>"]
+        F["⚙️ Video Worker<br/><span style='font-size:10px'>FFmpeg</span>"]
+    end
+
+    subgraph DB["Banco (existente)"]
+        G[("🐘 PostgreSQL")]
+    end
+
+    A -- "1. Gera URLs" --> C
+    C -- "2. Initia Multipart" --> D
+    C -- "3. Devolve URLs" --> A
+    A -- "4. Envia partes ⬆️" --> D
+    A -- "5. Avisa conclusão" --> C
+    C -- "6. Completa upload" --> D
+    C -- "7. Publica job 📤" --> E
+    E -- "8. Worker consume" --> F
+    F -- "9. Lê vídeo" --> D
+    F -- "10. Salva thumbnail" --> D
+    F -- "11. Atualiza status" --> G
+
+    style A fill:#2563eb,color:#fff
+    style B fill:#64748b,color:#fff
+    style C fill:#7c3aed,color:#fff
+    style D fill:#f59e0b,color:#000
+    style E fill:#ef4444,color:#fff
+    style F fill:#10b981,color:#fff
+    style G fill:#3b82f6,color:#fff
+      </div>
+    </div>
+
+    <div class="card-grid" style="margin-top:1rem;">
+      <div class="card">
+        <h3>🗄️ MinIO <span class="tag tag-new">Novo</span></h3>
+        <p>Servidor de object storage compatível com a API do S3 (AWS). Onde os vídeos e thumbnails são armazenados. Em produção, troca-se pelo S3 real sem mudar código.</p>
+      </div>
+      <div class="card">
+        <h3>📨 Redis + BullMQ <span class="tag tag-new">Novo</span></h3>
+        <p>O Redis é o "banco de memória" que mantém a fila de tarefas. O BullMQ (dentro do NestJS) gerencia jobs: enfileira o processamento, tenta novamente em caso de erro, controla quantos jobs rodam por vez.</p>
+      </div>
+      <div class="card">
+        <h3>⚙️ Video Worker <span class="tag tag-new">Novo</span></h3>
+        <p>Container separado que roda FFmpeg. Ele pega o job da fila, baixa o vídeo do MinIO (só os frames que precisa), extrai metadados com ffprobe, gera a thumbnail e atualiza o banco.</p>
+      </div>
+      <div class="card">
+        <h3>🐘 PostgreSQL <span class="tag tag-existing">Existe</span></h3>
+        <p>Já existente. A Fase 03 adiciona a tabela <code>videos</code> com relação ao canal. O worker atualiza o status do vídeo aqui diretamente.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 2: The Big Idea — Zero Bytes Through the API -->
+  <div class="section">
+    <div class="section-header">
+      <span class="step">2</span>
+      <h2>A Ideia Central: Zero Bytes na API</h2>
+    </div>
+
+    <div class="callout warning">
+      <strong>🚫 Isso reprova o projeto:</strong> "Passar o arquivo de 10GB pela API de forma que trave o sistema (sem estratégia de upload assíncrono/direto)" — se o arquivo passar pelo NestJS, o sistema trava e o projeto é <strong>reprovado automaticamente</strong>.
+    </div>
+
+    <div class="card-grid">
+      <div class="card">
+        <h3>❌ Errado: Upload via API</h3>
+        <ul>
+          <li>Cliente envia arquivo para o NestJS</li>
+          <li>NestJS recebe 10GB no body da requisição</li>
+          <li>Memória explode / conexão expira</li>
+          <li>API fica ocupada e não atende outros usuários</li>
+          <li><strong>Reprova automática</strong></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>✅ Certo: Upload Direto (Presigned URL)</h3>
+        <ul>
+          <li>Cliente pede uma "autorização" para a API</li>
+          <li>API gera URLs temporárias para o MinIO</li>
+          <li>Cliente envia o arquivo <strong>direto para o MinIO</strong></li>
+          <li>API nunca vê o arquivo — só gerencia metadados</li>
+          <li><strong>Critério de aceite satisfeito</strong></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout success">
+      <strong>📌 O segredo:</strong> O MinIO e o S3 têm a mesma API. A gente usa o <code>@aws-sdk/client-s3</code> para falar com o MinIO. Se um dia formos para a AWS S3 de verdade, <strong>zero mudanças no código</strong>.
+    </div>
+  </div>
+
+  <!-- Section 3: Upload Flow - Sequence Diagram -->
+  <div class="section">
+    <div class="section-header">
+      <span class="step">3</span>
+      <h2>Fluxo de Upload (10GB sem travar)</h2>
+    </div>
+
+    <p style="margin-bottom:1rem;font-size:0.9rem;color:var(--muted-foreground);">
+      Como o envio de 10GB acontece pedaço por pedaço, em paralelo, sem nunca travar a API.
+    </p>
+
+    <div class="diagram-container">
+      <div class="mermaid">
+sequenceDiagram
+    participant C as Cliente
+    participant API as API NestJS
+    participant M as MinIO
+
+    C->>API: POST /videos/initiate-upload
+    Note over API: Cria registro do vídeo (status: draft)
+    API->>M: CreateMultipartUpload
+    M-->>API: UploadId
+    API->>API: Gera N presigned URLs (uma por parte)
+    API-->>C: { videoId, uploadId, parts: [URLs], partSize }
+
+    Note over C: Divide o arquivo em partes de ~100MB<br/>Para 10GB = ~100 partes
+
+    par Upload paralelo
+        C->>M: PUT parte 1 (presigned URL 1)
+        C->>M: PUT parte 2 (presigned URL 2)
+        C->>M: PUT parte 3 (presigned URL 3)
+        Note right of M: Até 6 uploads simultâneos
+    end
+
+    C->>API: POST /videos/complete-upload { videoId, parts: [ETags] }
+    API->>M: CompleteMultipartUpload
+    M-->>API: OK
+    API->>API: Avança status: processing
+    API->>Redis: Publica job de processamento
+    API-->>C: { status: "processing" }
+      </div>
+    </div>
+
+    <div class="callout">
+      <strong>💡 Por que multipart?</strong> O MinIO/S3 limita upload único a 5GB. Para 10GB, precisamos dividir. Além disso, se uma parte falhar na rede, <strong>só aquela parte é reenviada</strong> — não o arquivo inteiro. E com upload em paralelo, fica mais rápido.
+    </div>
+  </div>
+
+  <!-- Section 4: Processing Pipeline -->
+  <div class="section">
+    <div class="section-header">
+      <span class="step">4</span>
+      <h2>Pipeline de Processamento</h2>
+      <span class="tag tag-new">Worker + FFmpeg</span>
+    </div>
+
+    <p style="margin-bottom:1rem;font-size:0.9rem;color:var(--muted-foreground);">
+      Depois que o upload é concluído, a API publica um job na fila. O worker (container separado) pega o job e processa.
+    </p>
+
+    <div class="pipeline">
+      <div class="pipe-step">
+        <span class="emoji">📤</span>
+        <span class="pipe-label">job publicado</span>
+        <span class="pipe-desc">API → BullMQ</span>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <span class="emoji">📡</span>
+        <span class="pipe-label">worker recebe</span>
+        <span class="pipe-desc">consome da fila</span>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <span class="emoji">🔍</span>
+        <span class="pipe-label">ffprobe</span>
+        <span class="pipe-desc">extrai metadados</span>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <span class="emoji">🖼️</span>
+        <span class="pipe-label">ffmpeg</span>
+        <span class="pipe-desc">gera thumbnail</span>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <span class="emoji">💾</span>
+        <span class="pipe-label">salva tudo</span>
+        <span class="pipe-desc">thumb → MinIO<br/>status → DB</span>
+      </div>
+    </div>
+
+    <div class="card-grid">
+      <div class="card">
+        <h3>📊 Extração de Metadados (ffprobe)</h3>
+        <p>O <code>ffprobe</code> lê o vídeo e extrai informações como duração, resolução (1920x1080), codec (H.264), bitrate, frames por segundo. Tudo isso é salvo no banco.</p>
+      </div>
+      <div class="card">
+        <h3>🖼️ Geração de Thumbnail (ffmpeg)</h3>
+        <p>O <code>ffmpeg</code> captura UM frame do vídeo (ex: aos 4 segundos) usando <code>-ss 00:00:04</code> e <code>-vframes 1</code>. Ele <strong>não baixa o vídeo inteiro</strong> — só os bytes necessários via range request. A thumbnail é salva no MinIO.</p>
+      </div>
+      <div class="card">
+        <h3>🔄 Retry Automático (BullMQ)</h3>
+        <p>Se o processamento falhar, o BullMQ tenta <strong>3 vezes</strong> com backoff exponencial (1min, 5min, 15min). Se todas falharem, o status vai para <code>error</code>.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 5: Status Lifecycle -->
+  <div class="section">
+    <div class="section-header">
+      <span class="step">5</span>
+      <h2>Ciclo de Status do Vídeo</h2>
+      <span class="tag tag-new">4 estados</span>
+    </div>
+
+    <div class="diagram-container">
+      <div class="mermaid">
+stateDiagram-v2
+    [*] --> draft : Upload iniciado
+    draft --> processing : Upload concluído
+
+    state processing {
+        [*] --> extraindo_metadata
+        extraindo_metadata --> gerando_thumbnail
+        gerando_thumbnail --> finalizando
+    end
+
+    processing --> ready : Sucesso ✅
+    processing --> error : 3 tentativas falharam ❌
+
+    ready --> [*] : Vídeo disponível
+    error --> draft : Re-upload
+    error --> [*] : Abandonado
+      </div>
+    </div>
+
+    <div class="card-grid" style="margin-top:1rem;">
+      <div class="card" style="border-left:4px solid var(--muted-foreground);">
+        <h3>📝 draft (rascunho)</h3>
+        <p>O upload foi iniciado. O registro do vídeo já existe no banco com informações básicas (título, canal). As partes do arquivo ainda estão sendo enviadas para o MinIO.</p>
+      </div>
+      <div class="card" style="border-left:4px solid var(--warning);">
+        <h3>⚙️ processing</h3>
+        <p>O upload foi concluído e o worker está processando. FFmpeg está extraindo metadados e gerando thumbnail. O vídeo ainda <strong>não está disponível</strong> para streaming.</p>
+      </div>
+      <div class="card" style="border-left:4px solid var(--success);">
+        <h3>✅ ready (pronto)</h3>
+        <p>Processamento concluído com sucesso. Metadados salvos, thumbnail gerada. O vídeo pode ser <strong>streamado e baixado</strong>.</p>
+      </div>
+      <div class="card" style="border-left:4px solid var(--destructive);">
+        <h3>❌ error</h3>
+        <p>O processamento falhou após 3 tentativas. O vídeo original ainda está no MinIO, mas não foi processado. O usuário pode tentar novamente (re-upload).</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 6: Streaming & Download -->
+  <div class="section">
+    <div class="section-header">
+      <span class="step">6</span>
+      <h2>Streaming e Download</h2>
+    </div>
+
+    <div class="diagram-container">
+      <div class="mermaid">
+sequenceDiagram
+    participant Player as Player/Download
+    participant API as API NestJS
+    participant M as MinIO
+
+    Player->>API: GET /videos/:id/stream
+    Note over API: Verifica status: ready
+    API->>M: Gera presigned GET URL
+    API-->>Player: { streamUrl, expiresIn }
+
+    Note over Player: Usa a URL direto no MinIO
+
+    Player->>M: GET /bucket/video.mp4<br/>Range: bytes=0-1048575
+    M-->>Player: 206 Partial Content<br/>Content-Range: bytes 0-1048575/X
+    Note over Player: Player pede o próximo chunk<br/>com Range: bytes=1048576-2097151
+      </div>
+    </div>
+
+    <div class="card-grid" style="margin-top:1rem;">
+      <div class="card">
+        <h3>▶️ Streaming com Range Requests</h3>
+        <p>O player de vídeo nunca baixa o arquivo inteiro. Ele pede pedaços (chunks) de ~1MB usando o cabeçalho HTTP <code>Range</code>. O MinIO responde com <code>206 Partial Content</code> e só manda aquele pedaço.</p>
+      </div>
+      <div class="card">
+        <h3>⬇️ Download</h3>
+        <p>O download usa a mesma presigned URL, mas o navegador baixa o arquivo inteiro (sem <code>Range</code>). A URL expira após um tempo configurável (ex: 24h).</p>
+      </div>
+      <div class="card">
+        <h3>🔗 URL Única (UUID)</h3>
+        <p>Cada vídeo recebe um UUID gerado pelo PostgreSQL — <code>550e8400-e29b-41d4-a716-446655440000</code>. Zero chance de conflito, mesma estratégia de usuários e canais.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 7: Key Decisions -->
+  <div class="section">
+    <div class="section-header">
+      <span class="step">7</span>
+      <h2>Decisões Técnicas</h2>
+      <span class="tag tag-new">Research</span>
+    </div>
+
+    <p style="margin-bottom:1rem;font-size:0.9rem;color:var(--muted-foreground);">
+      Cada decisão técnica foi documentada em <code>docs/decisions/technical-decisions-phase-03-videos.md</code> com as opções consideradas, prós, contras e justificativa.
+    </p>
+
+    <div class="card-grid">
+      <div class="card">
+        <h3>🏗️ Fila: BullMQ + Redis</h3>
+        <ul>
+          <li>Integração nativa com NestJS</li>
+          <li>Retry automático (3 tentativas)</li>
+          <li>Container leve (~5MB)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>📤 Upload: Presigned Multipart</h3>
+        <ul>
+          <li>Zero bytes na API</li>
+          <li>Partes de ~100MB em paralelo</li>
+          <li>Funciona com MinIO e S3</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>⚙️ Worker: mesmo código</h3>
+        <ul>
+          <li>Compartilha entidades e config</li>
+          <li>Container separado</li>
+          <li>FFmpeg + ffprobe via CLI</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>▶️ Streaming: Presigned GET</h3>
+        <ul>
+          <li>MinIO nativo (zero código)</li>
+          <li>Range requests / 206</li>
+          <li>API nunca sobrecarregada</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>🔗 URL: UUID v4</h3>
+        <ul>
+          <li>Padrão do projeto</li>
+          <li>Zero conflito</li>
+          <li>uuid-ossp já instalado</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>🔄 Status: 4 estados</h3>
+        <ul>
+          <li>draft → processing → ready/error</li>
+          <li>Usuário sabe se deu erro</li>
+          <li>Banco reflete estado real</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    StreamTube — Fase 03 · Documentação gerada pelo fluxo de IA do projeto<br>
+    Documento de decisões completo em <code>docs/decisions/technical-decisions-phase-03-videos.md</code>
+  </footer>
+
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    look: 'classic',
+    securityLevel: 'loose',
+    themeVariables: {
+      background: isDark ? '#1e1b2e' : '#f8f7ff',
+      primaryColor: isDark ? '#2e1a47' : '#e8dff5',
+      primaryBorderColor: isDark ? '#7c3aed' : '#6a0dad',
+      primaryTextColor: isDark ? '#e2e8f0' : '#1a0533',
+      lineColor: isDark ? '#4a3a6a' : '#8b5cf6',
+      secondaryColor: isDark ? '#1a2e2e' : '#d4f5e8',
+      tertiaryColor: isDark ? '#2a1e1e' : '#fde8d0',
+      fontSize: '14px',
+      fontFamily: 'Inter, system-ui, sans-serif',
+      actorBorder: isDark ? '#7c3aed' : '#6a0dad',
+      actorBkg: isDark ? '#2e1a47' : '#e8dff5',
+      actorTextColor: isDark ? '#e2e8f0' : '#1a0533',
+      signalColor: isDark ? '#7c3aed' : '#6a0dad',
+      signalTextColor: isDark ? '#e2e8f0' : '#1a0533',
+      labelTextColor: isDark ? '#cbd5e1' : '#475569',
+      stateBkg: isDark ? '#2e1a47' : '#e8dff5',
+      stateBorder: isDark ? '#7c3aed' : '#6a0dad',
+      stateLabel: isDark ? '#e2e8f0' : '#1a0533',
+    }
+  });
+</script>
+
+</body>
+</html>
