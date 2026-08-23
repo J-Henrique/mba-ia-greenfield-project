@@ -1,414 +1,277 @@
 ---
 kind: phase
 name: phase-03-videos
+test_specs_aware: true
 sources_mtime:
-  docs/project-plan.md: "2026-08-19T10:00:00-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-08-19T10:00:00-03:00"
-  docs/phases/phase-03-videos/context.md: "2026-08-19T10:00:00-03:00"
-  docs/decisions/technical-decisions-phase-01-configuracao-base.md: "2026-05-12T12:21:12-03:00"
+  docs/phases/phase-03-videos/context.md: "2026-08-23T18:16:29.520913878-03:00"
+  docs/phases/phase-03-videos/library-refs.md: "2026-08-23T16:43:28.451490697-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-08-23T16:43:00.122181501-03:00"
+  docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-07-22T22:00:56.644499386-03:00"
 ---
 
 # Phase 03 — Upload e Processamento de Vídeos
 
 ## Objective
 
-Deliver the video pipeline for StreamTube — upload files up to 10GB without blocking the API (presigned multipart upload direct to MinIO/S3), async processing with BullMQ and FFmpeg worker, unique video URLs, streaming via HTTP Range requests, and download.
+Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO/S3) e processamento assíncrono em fila (BullMQ + Redis + worker FFmpeg), upload de vídeos de até 10GB sem travar a API via presigned multipart upload, pré-cadastro automático como rascunho, processamento automático (duração/metadados + thumbnail), URLs únicas, streaming por HTTP Range e download.
 
 ---
 
 ## Step Implementations
 
-### SI-03.1 — Dependencies, Configuration Namespaces, and Docker Compose
+### SI-03.1 — Infra: dependências, config namespaces e Docker Compose
 
-**Description:** Install all Phase 03 production dependencies, create `storage` and `queue` config namespaces following the `registerAs` pattern from Phase 01, extend the Joi validation schema, and add MinIO, Redis, and video-worker services to Docker Compose.
+**Description:** Instala as bibliotecas da fase, cria os namespaces de configuração (storage/fila) seguindo o padrão `registerAs`, estende o schema Joi e sobe MinIO, Redis e o worker no Docker Compose.
 
 **Technical actions:**
 
-1. Install production dependencies in nestjs-project:
-   - `npm install @nestjs/bullmq@^11.0.5 bullmq@^6.2.0 ioredis@^5.x`
-   - `npm install @aws-sdk/client-s3@^3.x @aws-sdk/s3-request-presigner@^3.x`
+1. Instalar dependências: `npm i @nestjs/bullmq@^11.0.5 bullmq@^6.2.0 ioredis@^5.x @aws-sdk/client-s3@^3.x @aws-sdk/s3-request-presigner@^3.x` (per `phase-03-videos/TD-01`, `TD-02`)
+2. Criar `src/config/storage.config.ts` — `registerAs('storage', ...)` lendo `MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET`, `MINIO_USE_SSL`, `PRESIGNED_URL_EXPIRATION_SECONDS` (per `phase-03-videos/TD-02`)
+3. Criar `src/config/queue.config.ts` — `registerAs('queue', ...)` lendo `REDIS_HOST`, `REDIS_PORT` (per `phase-03-videos/TD-01`)
+4. Estender `src/config/env.validation.ts` (Joi) com storage/queue env vars (per convenção phase 01)
+5. Adicionar ao `compose.yaml` os serviços `minio` (portas 9000/9001, `MINIO_ROOT_USER/PASSWORD`), `redis` (6379) e `video-worker` (Dockerfile.worker) (per `phase-03-videos/TD-01`, `TD-03`)
 
-2. Create `src/config/storage.config.ts` — `registerAs('storage', ...)` reading:
-   - `MINIO_ENDPOINT` (string, default `'minio'`)
-   - `MINIO_PORT` (number, default `9000`)
-   - `MINIO_ACCESS_KEY` (string, default `'streamtube'`)
-   - `MINIO_SECRET_KEY` (string, default `'streamtube-secret'`)
-   - `MINIO_BUCKET` (string, default `'streamtube-videos'`)
-   - `MINIO_USE_SSL` (boolean, default `false`)
-   - `PRESIGNED_URL_EXPIRATION_SECONDS` (number, default `86400` — 24h)
+**Tests:** _(empty — Infra)_
 
-3. Create `src/config/queue.config.ts` — `registerAs('queue', ...)` reading:
-   - `REDIS_HOST` (string, default `'redis'`)
-   - `REDIS_PORT` (number, default `6379`)
-   - `QUEUE_VIDEO_PROCESSING` (string, default `'video-processing'`)
-
-4. Update `src/config/env.validation.ts` — add all new env vars to the Joi schema. Update `.env.example`.
-
-5. Update `nestjs-project/compose.yaml`:
-   - Add `minio` service: image `minio/minio`, ports `9000:9000` (API) and `9001:9001` (console), env vars `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`, volume `minio_data:/data`, command `server /data --console-address ":9001"`, healthcheck
-   - Add `redis` service: image `redis:7-alpine`, port `6379`, healthcheck
-   - Add `video-worker` service: build from `Dockerfile.worker`, depends_on: `redis`, `minio`, `db`
-
-6. Create `nestjs-project/Dockerfile.worker`:
-   - Same base as API (Node.js)
-   - Install FFmpeg: `apt-get update && apt-get install -y ffmpeg`
-   - Copy `package.json`, install deps, copy source
-   - No build step (dev mode) — entrypoint runs via ts-node
-
-7. Register `ConfigModule.forRoot({ load: [storageConfig, queueConfig] })` — already global, just add to the existing load array in `app.module.ts`.
-
-**Tests:** No tests — infrastructure setup (configs, compose, Dockerfile). Verify by starting the services and confirming the API still boots.
-
-**Dependencies:** None
+**Dependencies:** none
 
 **Acceptance criteria:**
-- Application starts without errors when all new env vars are provided
-- Starting without `MINIO_ACCESS_KEY` causes a Joi validation error
-- `docker compose up -d` starts MinIO (port 9000), Redis (port 6379), and video-worker containers successfully
-- MinIO is reachable via S3 API at `http://localhost:9000`
-- Redis is reachable via `redis-cli ping` on port 6379
+
+- `package.json` contém as 6 novas dependências em `dependencies`
+- `storage.config.ts` e `queue.config.ts` existem e usam `registerAs`
+- `env.validation.ts` valida as novas envs sem erro ao bootar
+- `docker compose config` aceita os 3 novos serviços (minio, redis, video-worker)
 
 ---
 
-### SI-03.2 — StorageModule (MinIO/S3 Client)
+### SI-03.2 — Entidade Video + migration CreateVideos
 
-**Description:** Create the `StorageModule` and `StorageService` that encapsulates all MinIO/S3 operations: presigned multipart upload URLs, presigned GET URLs for streaming/download, and lifecycle configuration.
+**Description:** Cria a entidade `Video` com todos os campos do Data Model (status, storage keys, metadados) ligada ao `Channel`, e a migration que materializa a tabela.
 
 **Technical actions:**
 
-1. Create `src/storage/storage.module.ts` — `StorageModule` with `StorageService` provider, exports `StorageService`. Uses `BullModule.registerQueueAsync({ name: 'video-processing' })` in imports.
-
-2. Create `src/storage/storage.service.ts` — injects `ConfigType<typeof storageConfig>` via `@Inject(storageConfig.KEY)`:
-   - **`createS3Client()`** — private factory: creates `S3Client` with `region: 'us-east-1'`, `endpoint: http://${host}:${port}`, `forcePathStyle: true` (required for MinIO), `credentials: { accessKeyId, secretAccessKey }`
-   - **`initiateMultipartUpload(key: string): Promise<{ uploadId: string, key: string }>`** — calls `CreateMultipartUploadCommand` for the video file
-   - **`generatePresignedUrls(uploadId: string, key: string, partCount: number): Promise<string[]>`** — generates N presigned URLs (one per part) via `getSignedUrl(s3Client, new UploadPartCommand({...}), { expiresIn })`. Part size is 100MB (passed as metadata, not enforced server-side).
-   - **`completeMultipartUpload(uploadId: string, key: string, parts: { ETag: string, PartNumber: number }[]): Promise<void>`** — calls `CompleteMultipartUploadCommand`
-   - **`abortMultipartUpload(uploadId: string, key: string): Promise<void>`** — calls `AbortMultipartUploadCommand` (for error recovery)
-   - **`getPresignedUrl(key: string): Promise<string>`** — generates presigned GET URL via `getSignedUrl(s3Client, new GetObjectCommand({...}), { expiresIn })`
-   - **`uploadThumbnail(key: string, buffer: Buffer, contentType: string): Promise<void>`** — calls `PutObjectCommand` for thumbnail files
-
-3. Create `src/storage/` directory with barrel `index.ts`.
+1. Criar `src/videos/entities/video.entity.ts` — campos do Data Model: `id` (uuid, PK), `channelId` (FK → channel), `title`, `description`, `status` (enum draft/processing/ready/error, default 'draft'), `durationSeconds`, `width`, `height`, `codec`, `fileSizeBytes`, `videoKey`, `thumbnailKey`, `mimeType`, `errorMessage`, timestamps (per `phase-03-videos/TD-04a` — URL única UUID, `TD-05` — ciclo de status)
+2. Definir relation `@ManyToOne(() => Channel)` — `channel_id` FK not null (per `## Inherited Conventions` — fase 02)
+3. Criar migration `<timestamp>-CreateVideos.ts` — `CREATE TABLE videos` com campos + FK p/ `channels` + índice em `channel_id`
+4. Registrar `Video` no `VideosModule` (import até hoje inexistente — referencia criado no SI-03.5) e expor via `TypeOrmModule.forFeature`
+5. Rodar `npm run migration:run` (dentro do container `nestjs-api`) e verificar tabela criada
 
 **Tests:**
 
-| File | Layer | Verifies |
-|------|-------|----------|
-| `src/storage/storage.service.integration-spec.ts` | Integration | Real MinIO: initiate multipart, generate presigned URLs, complete upload, get presigned URL, abort multipart. Upload a small file via presigned URL and verify it's retrievable. |
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `Video` entity | Integration: constraints, defaults, `status` enum | `src/videos/video.entity.integration-spec.ts` |
 
-**Dependencies:** SI-03.1 (MinIO service, storage config)
+**Dependencies:** none (any relation mas entity é stand-alone; requer `Channel` existente da fase 02)
 
 **Acceptance criteria:**
-- `initiateMultipartUpload` returns an UploadId from MinIO
-- `generatePresignedUrls` returns N valid presigned PUT URLs
-- A file PUT to a presigned URL is stored in MinIO and readable via `getPresignedUrl`
-- `abortMultipartUpload` cleans up in-progress multipart upload
-- `uploadThumbnail` stores a Buffer as a content-type-aware object in MinIO
+
+- Migration cria `videos` com `channel_id` FK not null e índice em `channel_id`
+- `status` default é `draft`; enum aceita draft/processing/ready/error
+- `id` é uuid gerado via uuid-ossp
+- `INSERT INTO videos` sem channel_id falha (constraint FK)
 
 ---
 
-### SI-03.3 — QueueModule (BullMQ)
+### SI-03.3 — StorageModule com MinIO (S3)
 
-**Description:** Create the `QueueModule` and `QueueService` that wraps BullMQ queue operations. This module publishes video processing jobs and will be consumed by the worker.
+**Description:** Implementa o serviço de armazenamento por trás do presigned multipart upload e do streaming/download — cliente S3 apontando para MinIO (dev), factory `registerAs`, geração de presigned URLs e operações de multipart.
 
 **Technical actions:**
 
-1. Create `src/queue/queue.module.ts` — imports `BullModule.forRootAsync({ useFactory: ... })` configuring Redis connection from `queue.config.ts`. Registers the `video-processing` queue via `BullModule.registerQueueAsync({ name: 'video-processing' })`. Exports `QueueService` and `BullModule` (so the worker module can access the queue).
-
-2. Create `src/queue/queue.service.ts`:
-   - **`publishVideoProcessingJob(videoId: string): Promise<Job>`** — adds a job to the `video-processing` queue with payload `{ videoId }`, options: `{ attempts: 3, backoff: { type: 'exponential', delay: 60000 } }`
+1. Criar `src/storage/storage.module.ts` — `@Module({ imports: [ConfigModule] })`, provider global `S3Client` custom (endpoint `http://minio:9000`, `forcePathStyle: true`, credentials do `storage.config`, per `phase-03-videos/TD-02`)
+2. Criar `src/storage/storage.service.ts` — `createMultipartUpload`, `generatePresignedPartUrls`, `completeMultipartUpload`, `abortMultipartUpload` (limpeza de upload incompleto — não completado / cancelado), `uploadThumbnail` (PUT do thumbnail no MinIO), `generatePresignedGetUrl` (com range para stream e `response-content-disposition=attachment` para download, expiração 24h, per `phase-03-videos/TD-02`, `TD-04b`)
+3. Criar `src/storage/bucket.init.ts` (ou equivalente) — cria o bucket `streamtube-videos` na inicialização se não existir (per convenção Docker — rodar dentro do container)
+4. Registrar `StorageModule` no `AppModule`
+5. Garantir `ensure-bucket` no boot da API (lifecycle `OnModuleInit`)
 
 **Tests:**
 
-| File | Layer | Verifies |
-|------|-------|----------|
-| `src/queue/queue.module.spec.ts` | Unit | Module compiles |
-| `src/queue/queue.service.integration-spec.ts` | Integration | Real Redis: publish job, verify it's in the queue, verify job payload |
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `StorageService` | Integration: real MinIO (Docker) — upload/partes/presigned | `src/storage/storage.service.integration-spec.ts` |
 
-**Dependencies:** SI-03.1 (Redis service, queue config)
+**Dependencies:** SI-03.1 — config namespaces (storage) + service minio no compose
 
 **Acceptance criteria:**
-- `publishVideoProcessingJob` adds a job to the `video-processing` queue
-- Job payload contains the correct `videoId`
-- Queue client connects to Redis successfully
+
+- `POST`-path do multipart aceita parte de 100MB e `completeMultipartUpload` consolida o objeto em MinIO
+- `abortMultipartUpload` cancela um multipart em andamento e remove as partes órfãs do MinIO
+- `uploadThumbnail` grava um buffer em `thumbnails/{videoId}.jpg` com content-type correto
+- `generatePresignedGetUrl` retorna URL assinada que faz GET com `206` (range) e `200` com attachment (per `phase-03-videos/TD-04b`)
+- Atributos do storage vêm de `storage.config` (não hardcoded), e o bucket `streamtube-videos` existe após boot
 
 ---
 
-### SI-03.4 — Video Entity and Migration
+### SI-03.4 — QueueModule com BullMQ
 
-**Description:** Create the `Video` entity with a many-to-one relationship to `Channel`. Generate the migration for the `videos` table.
+**Description:** Configura a fila `video-processing` com BullMQ + Redis e expõe um serviço para publicar jobs de processamento após o upload completo.
 
 **Technical actions:**
 
-1. Create `src/videos/entities/video.entity.ts`:
-   ```
-   @Entity('videos')
-   export class Video {
-     @PrimaryGeneratedColumn('uuid')
-     id: string;
-
-     @Column({ length: 255 })
-     title: string;
-
-     @Column({ type: 'text', nullable: true })
-     description: string;
-
-     @Column({
-       type: 'enum',
-       enum: ['draft', 'processing', 'ready', 'error'],
-       default: 'draft',
-     })
-     status: VideoStatus;
-
-     @Column({ name: 'storage_key', length: 500 })
-     storageKey: string;        // MinIO key: videos/{uuid}.mp4
-
-     @Column({ name: 'thumbnail_key', length: 500, nullable: true })
-     thumbnailKey: string;       // MinIO key: thumbnails/{uuid}.jpg
-
-     @Column({ name: 'file_size', type: 'bigint', nullable: true })
-     fileSize: number;
-
-     @Column({ length: 50, nullable: true })
-     mimeType: string;
-
-     @Column({ type: 'int', nullable: true })
-     duration: number;            // in seconds
-
-     @Column({ type: 'int', nullable: true })
-     width: number;
-
-     @Column({ type: 'int', nullable: true })
-     height: number;
-
-     @Column({ length: 50, nullable: true })
-     codec: string;
-
-     @Column({ type: 'text', nullable: true })
-     errorMessage: string;        // stored when status = error
-
-     @Column({ name: 'channel_id' })
-     channelId: string;
-
-     @ManyToOne(() => Channel)
-     @JoinColumn({ name: 'channel_id' })
-     channel: Channel;
-
-     @CreateDateColumn({ name: 'created_at' })
-     createdAt: Date;
-
-     @UpdateDateColumn({ name: 'updated_at' })
-     updatedAt: Date;
-   }
-   ```
-
-2. Create `src/videos/enums/video-status.enum.ts` — `VideoStatus` enum with `DRAFT = 'draft'`, `PROCESSING = 'processing'`, `READY = 'ready'`, `ERROR = 'error'`.
-
-3. Update `src/channels/entities/channel.entity.ts` — add `@OneToMany(() => Video, video => video.channel)` relation (no migration change — just TypeScript).
-
-4. Generate migration via: `docker compose exec nestjs-api npm run migration:generate -- src/database/migrations/CreateVideos`. Review and adjust if needed.
-
-5. Register `Video` entity in `TypeOrmModule.forFeature([Video])` in `VideosModule`.
+1. Criar `src/queue/queue.module.ts` — `BullModule.forRootAsync({ useFactory: queueConfig })` (host/port do `queue.config`, per `phase-03-videos/TD-01`) + `BullModule.registerQueue({ name: 'video-processing' })`
+2. Criar `src/queue/queue.service.ts` — `publishProcessingJob({ videoId, channelId, videoKey })` com `queue.add()` e retry config (`attempts: 3`, backoff exponencial, per `phase-03-videos/TD-01`, `TD-05`)
+3. Registrar `QueueModule` no `AppModule`
+4. Garantir `ioredis` apontando para Redis (containers `redis` no compose)
 
 **Tests:**
 
-| File | Layer | Verifies |
-|------|-------|----------|
-| `src/videos/entities/video.entity.integration-spec.ts` | Integration | Create/save Video linked to Channel, query by ID, query by channel, verify defaults (status: draft, timestamps) |
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `QueueService` | Integration: real Redis (Docker) — job enfileirado com payload correto | `src/queue/queue.service.integration-spec.ts` |
 
-**Dependencies:** SI-03.1 (database config, app.module.ts)
+**Dependencies:** SI-03.1 — config namespace queue + serviço redis no compose
 
 **Acceptance criteria:**
-- Video is saved with `status: 'draft'` by default
-- Video is linked to a Channel via `channel_id` FK
-- Read/Write operations work correctly in integration test
-- Migration runs without errors both for `up` and `down`
+
+- `publishProcessingJob` enfileira job em `video-processing` com retry configurado (3 tentativas, backoff)
+- Queue module compila e registra a fila sem erro (DI wiring)
+- Redis connection usa `REDIS_HOST`/`REDIS_PORT` do `queue.config`
 
 ---
 
-### SI-03.5 — Upload Flow (Initiate and Complete Multipart Upload)
+### SI-03.5 — VideosModule + POST /videos/initiate (pré-cadastro + multipart)
 
-**Description:** Create the `VideosController` and `VideosService` with endpoints to initiate the multipart upload (pre-cadastro as draft) and complete it. This is the core of the upload flow.
+**Description:** Cria o `VideosModule` completo (entity, service, controller) e implementa o endpoint de iniciação de upload: pré-registra o vídeo como `draft`, inicia multipart no MinIO e retorna as presigned URLs das partes.
+
+**Route:** POST /videos/initiate
+**Test Specs:** _pending /plan-test-specs_
 
 **Technical actions:**
 
-1. Create `src/videos/videos.module.ts` — imports `TypeOrmModule.forFeature([Video])`, `QueueModule`, `StorageModule`. Registers `VideosController`, `VideosService`. Exports `VideosService` (needed by worker in the same process context, though worker is separate).
-
-2. Create `src/videos/videos.service.ts`:
-   - **`initiateUpload(channelId: string, fileName: string, fileSize: number, mimeType: string): Promise<InitiateUploadResponse>`** —
-     a. Determines file extension from mimeType
-     b. Generates UUID for the video
-     c. Creates storage key: `videos/{videoId}.{ext}`
-     d. Calls `storageService.initiateMultipartUpload(key)` → gets `uploadId`
-     e. Calculates part count: `Math.ceil(fileSize / PART_SIZE)` where `PART_SIZE = 100 * 1024 * 1024`
-     f. Calls `storageService.generatePresignedUrls(uploadId, key, partCount)` → gets presigned URLs
-     g. Creates `Video` record with `status: 'draft'`, `storageKey`, `fileSize`, `mimeType`, `channelId`
-     h. Returns `{ videoId, uploadId, partSize: PART_SIZE, parts: presignedUrls }`
-   - **`completeUpload(videoId: string, parts: { ETag: string; PartNumber: number }[]): Promise<void>`** —
-     a. Finds video by ID, validates status is `draft`
-     b. Calls `storageService.completeMultipartUpload(video.uploadId, video.storageKey, parts)`
-     c. Updates video status to `'processing'`
-     d. Publishes job via `queueService.publishVideoProcessingJob(videoId)`
-   - **`abortUpload(videoId: string): Promise<void>`** —
-     a. Finds video by ID
-     b. Calls `storageService.abortMultipartUpload(...)`
-     c. Removes video record (or marks as cancelled)
-
-3. Create `src/videos/dto/initiate-upload.dto.ts`:
-   ```typescript
-   export class InitiateUploadDto {
-     @IsString()
-     @IsNotEmpty()
-     @MaxLength(255)
-     title: string;
-
-     @IsString()
-     @IsNotEmpty()
-     fileName: string;
-
-     @IsNumber()
-     @IsPositive()
-     @Max(10 * 1024 * 1024 * 1024) // 10GB
-     fileSize: number;
-
-     @IsString()
-     @IsNotEmpty()
-     mimeType: string;
-   }
-   ```
-
-4. Create `src/videos/dto/complete-upload.dto.ts`:
-   ```typescript
-   export class CompleteUploadDto {
-     @IsArray()
-     @ArrayMinSize(1)
-     parts: UploadPartDto[];
-   }
-
-   export class UploadPartDto {
-     @IsNumber()
-     @IsPositive()
-     partNumber: number;
-
-     @IsString()
-     @IsNotEmpty()
-     etag: string;
-   }
-   ```
-
-5. Create `src/videos/videos.controller.ts`:
-   - `POST /videos` (authenticated) — `initiateUpload(req.user.channelId, dto)` → `201 { videoId, uploadId, partSize, parts: [urls] }`
-   - `POST /videos/:id/complete` (authenticated) — `completeUpload(id, dto.parts)` → `200 { status: 'processing' }`
-   - `POST /videos/:id/abort` (authenticated) — `abortUpload(id)` → `204`
-
-6. Create response DTOs for type safety.
+1. Criar `src/videos/videos.module.ts` — `TypeOrmModule.forFeature([Video])`, importa `StorageModule` + `QueueModule`, providers do service, declara controller (per `## Inherited Conventions` — estrutura de módulo fase 02)
+2. Criar `src/videos/videos.service.ts` — `initiateUpload(channelId, dto)`:
+   - `repo.save()` cria `Video` com `status: 'draft'`, `videoKey: videos/{id}.{ext}`, timestamps (per `phase-03-videos/TD-05`)
+   - chama `storageService.createMultipartUpload` + `generatePresignedPartUrls` (100MB/parte, per `phase-03-videos/TD-02`)
+   - retorna `{ video, uploadId, parts, completionUrl }` (per API Contracts)
+3. Criar `src/videos/initiate-upload.dto.ts` — `filename`, `mimeType`, `fileSize` com validação (`fileSize <= 10GB`, `class-validator`, per `## Inherited Decisions Detail` phase-02/TD-06)
+4. Criar `src/videos/videos.controller.ts` — `@Post('initiate')` guardado por JWT (global, per fase 02), injeta `@CurrentUser()`, chama `videosService.initiate`
+5. Registrar `VideosModule` no `AppModule`; aplicar `@ApiTags`/decorators OpenAPI (per `## Inherited Decisions Detail` → openapi-docs-nestjs/TD-01/02/03)
 
 **Tests:**
 
-| File | Layer | Verifies |
-|------|-------|----------|
-| `src/videos/videos.service.spec.ts` | Unit | Initiate upload logic (mocked storage/queue), complete/abort flows, status validation |
-| `src/videos/videos.service.integration-spec.ts` | Integration | Real DB + real MinIO + real Redis: initiate multipart, upload parts via presigned URLs, complete, verify status, verify job in queue |
-| `src/videos/videos.controller.spec.ts` | Unit | HTTP status codes, request validation |
-| `test/videos.e2e-spec.ts` | E2E | Full HTTP flow: register user → login → initiate upload → upload part → complete → verify status |
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `VideosService.initiate` | Unit: branch logic (mock repo + storage) — pre-cadastro draft + fileSize > 10GB | `src/videos/videos.service.spec.ts` |
+| `VideosController` | E2E: POST /videos/initiate com/sem auth | `test/videos-initiate.e2e-spec.ts` |
+| `VideosModule` | Unit: DI compilation | `src/videos/videos.module.spec.ts` |
 
-**Dependencies:** SI-03.2 (StorageModule), SI-03.3 (QueueModule), SI-03.4 (Video entity)
+**Dependencies:** SI-03.2 (entity), SI-03.3 (storage), SI-03.4 (queue service)
 
 **Acceptance criteria:**
-- `POST /videos` with valid auth returns 201 with `videoId`, `uploadId`, `partSize`, and `parts` array
-- Video record is created with `status: 'draft'`
-- A file uploaded via the presigned URLs is stored in MinIO
-- `POST /videos/:id/complete` changes status to `'processing'` and publishes a job
-- `POST /videos/:id/abort` aborts the multipart upload and cleans up
-- Attempting to complete a non-draft video returns an error
+
+- `POST /videos/initiate` com JWT e body válido retorna `201` com `video.status === "draft"` + `parts` (≥2 partes para arquivo grande) 
+- `POST /videos/initiate` sem JWT retorna `401`
+- `fileSize > 10GB` retorna `413 FILE_TOO_BIG`
+- `Video` é persistido com `status: draft` e `videoKey` `videos/{videoId}.{ext}`
 
 ---
 
-### SI-03.6 — Video Worker (FFmpeg Processing)
+### SI-03.6 — POST /videos/:id/complete (multipart completo + enfileirar)
 
-**Description:** Create the video worker — a separate container process that consumes jobs from the BullMQ queue, downloads video from MinIO, extracts metadata with ffprobe, generates a thumbnail with FFmpeg, uploads the thumbnail to MinIO, and updates the video record in the database.
+**Description:** Implementa a conclusão do upload multipart: consolida as partes no MinIO, atualiza o video para `processing` e publica o job na fila `video-processing`.
+
+**Route:** POST /videos/:id/complete
+**Test Specs:** _pending /plan-test-specs_
 
 **Technical actions:**
 
-1. Create `src/video-worker/main.ts` — worker entrypoint:
-   - Connects to BullMQ queue
-   - Listens for `video-processing` jobs
-   - Processes each job by calling `VideoProcessor.process(videoId)`
-
-2. Create `src/video-worker/video-processor.ts` — BullMQ `@Processor('video-processing')` class:
-   - `@Process()` — `async process(job: Job<{ videoId: string }>)`:
-     a. Updates video status to `'processing'`
-     b. Calls `ffmpegService.extractMetadata(video.storageKey)` → gets `{ duration, width, height, codec, size }`
-     c. Calls `ffmpegService.generateThumbnail(video.storageKey)` → gets `{ buffer, contentType }`
-     d. Uploads thumbnail via `storageService.uploadThumbnail(thumbKey, buffer, contentType)`
-     e. Updates video: status `'ready'`, thumbnailKey, duration, width, height, codec, fileSize
-   - On failure: updates video status to `'error'`, stores error message
-
-3. Create `src/video-worker/ffmpeg.service.ts`:
-   - **`generatePresignedUrl(storageKey: string): Promise<string>`** — gets presigned GET URL from storage service
-   - **`extractMetadata(presignedUrl: string): Promise<VideoMetadata>`** — runs `ffprobe -v quiet -print_format json -show_format -show_streams {presignedUrl}` and parses JSON output
-   - **`generateThumbnail(presignedUrl: string): Promise<{ buffer: Buffer, contentType: string }>`** — runs `ffmpeg -ss 00:00:04 -i {presignedUrl} -vframes 1 -q:v 2 -f image2pipe -` and captures stdout as Buffer
-
-4. Reference the worker in `nest-cli.json` as an additional entry (for `ts-node` support in dev):
-   ```json
-   "compilerOptions": {
-     "assets": [...]
-   }
-   ```
+1. Estender `videos.service.ts` — `completeUpload(userId, videoId, dto)`:
+   - verifica ownership (`channelId` do video == canal do user) e `status === 'draft'` (per `phase-03-videos/TD-05`)
+   - chama `storageService.completeMultipartUpload(uploadId, parts)` (per `phase-03-videos/TD-02`)
+   - `repo.update` → `status: 'processing'` e chama `queueService.publishProcessingJob(...)` (per `phase-03-videos/TD-01`)
+2. Criar `src/videos/complete-upload.dto.ts` — `parts: [{ partNumber, etag }]` com validação
+3. Estender `videos.controller.ts` — `@Post(':id/complete')`
+4. Mapear erros de domínio (404 VIDEO_NOT_FOUND, 403 FORBIDDEN, 400 INVALID_STATUS, per Error Catalog)
 
 **Tests:**
 
-| File | Layer | Verifies |
-|------|-------|----------|
-| `src/video-worker/ffmpeg.service.integration-spec.ts` | Integration | Real FFmpeg: extract metadata from a sample video, generate thumbnail, verify output format |
-| `src/video-worker/video-processor.integration-spec.ts` | Integration | Real Redis + MinIO + DB: publish job, process, verify video status is 'ready', verify thumbnail exists in MinIO |
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `VideosService.complete` | Unit: branch (mock repo/storage/queue) — status inválido, ownership, publish | `src/videos/videos.service.spec.ts` |
+| `complete` integration | Integration: real DB + MinIO + Redis — job enfileirado | `src/videos/videos.service.integration-spec.ts` |
+| `VideosController` | E2E: POST /videos/:id/complete | `test/videos-complete.e2e-spec.ts` |
 
-**Dependencies:** SI-03.2 (StorageModule), SI-03.3 (QueueModule), SI-03.4 (Video entity), SI-03.5 (upload flow)
+**Dependencies:** SI-03.4 (job publish), SI-03.5 (module/service base)
 
 **Acceptance criteria:**
-- Worker starts, connects to Redis, and listens for jobs
-- Processing a video extracts: duration (seconds), width, height, codec
-- Thumbnail JPEG is generated and stored in MinIO
-- Video status transitions from `'draft'` → `'processing'` → `'ready'`
-- On failure after 3 retries, status transitions to `'error'` with error message
+
+- `POST /videos/:id/complete` de canal dono com status `draft` retorna `204` e enfileira job `video-processing` com payload `{ videoId, channelId, videoKey }`
+- `POST /videos/:id/complete` de outro canal retorna `403 FORBIDDEN`
+- `POST /videos/:id/complete` com video em `processing` retorna `400 INVALID_STATUS`
+- Após complete, status do video no banco é `processing`
 
 ---
 
-### SI-03.7 — Streaming and Download Endpoints
+### SI-03.7 — Video Worker (FFmpeg): metadados + thumbnail + update DB
 
-**Description:** Create endpoints that return presigned GET URLs for streaming (with Range support) and download of processed videos.
+**Description:** Implementa o consumidor da fila `video-processing` num processo separado: extrai duração e metadados com ffprobe, gera a thumbnail com FFmpeg, faz upload para o MinIO e atualiza `status` para `ready` (ou `error` após retries esgotarem).
 
 **Technical actions:**
 
-1. Add to `VideosController`:
-   - `GET /videos/:id` (public) — returns video metadata: title, duration, status, thumbnail URL, channel info, etc.
-   - `GET /videos/:id/view` (public) — returns a presigned streaming URL (redirect or JSON). The client uses this URL directly with MinIO, which handles Range requests natively.
-   - `GET /videos/:id/download` (authenticated, only video owner) — returns a presigned download URL with `Content-Disposition: attachment` header hint.
-
-2. Add to `VideosService`:
-   - **`getVideo(videoId: string)`** — returns video metadata DTO. Only returns if status is `'ready'`.
-   - **`getStreamUrl(videoId: string): Promise<string>`** — generates presigned GET URL for the video's storageKey, expires in 24h.
-   - **`getDownloadUrl(videoId: string, userId: string): Promise<string>`** — verifies ownership (video belongs to user's channel), generates presigned GET URL.
-
-3. Create response DTOs:
-   - `VideoResponseDto` — id, title, status, duration, width, height, thumbnailUrl, channelId, channelName, createdAt
-   - `StreamUrlResponseDto` — `{ streamUrl: string, expiresIn: number }`
+1. Criar `src/video-worker/main.ts` — bootstrap do worker: connecta Redis (fila) + DB (TypeORM) e processa com `@Processor('video-processing')` (per `phase-03-videos/TD-03`)
+2. Criar `src/video-worker/video-processor.ts` — consumidor:
+   - baixa/streama o video do MinIO via presigned URL (per `phase-03-videos/TD-03` — FFmpeg lê por HTTP Range)
+   - ffprobe → `durationSeconds`, `width`, `height`, `codec` (per `phase-03-videos/TD-03`)
+   - ffmpeg `-ss 4 -vframes 1` → thumbnail `thumbnails/{videoId}.jpg` (per `phase-03-videos/TD-03`)
+   - `storageService.uploadThumbnail(videoId, buffer)` — grava `thumbnails/{videoId}.jpg` no MinIO + `repo.update` → `status: 'ready'` com metadados (per `phase-03-videos/TD-05`)
+   - retries inerentes ao BullMQ (3 tentativas); após esgotar → `status: 'error'` com `errorMessage` (per `phase-03-videos/TD-05`)
+3. Criar `src/video-worker/ffmpeg.service.ts` — wrapper de `child_process` para `ffprobe` e `ffmpeg` (substitui fluente pelo CLI puro, per `phase-03-videos/TD-03`)
+4. Criar `Dockerfile.worker` — base Node do projeto + `apt-get install ffmpeg`; entrypoint `node dist/video-worker/main.js` (per `phase-03-videos/TD-03`, resolved in I-02/I-06)
+5. Registrar `video-worker` no `compose.yaml` (image próprio, depends_on redis + minio, command `npm run start:worker` custom ou node dist)
 
 **Tests:**
 
-| File | Layer | Verifies |
-|------|-------|----------|
-| `src/videos/videos.service.spec.ts` | Unit | Get video (various statuses), get stream URL, get download URL with ownership check |
-| `test/videos.e2e-spec.ts` (extend) | E2E | Register user → upload video → process → get stream URL → fetch video metadata |
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `VideoProcessor` | Integration: real MinIO + Redis + FFmpeg — job de processamento atualiza DB e gera thumbnail | `src/video-worker/video-processor.integration-spec.ts` |
+| `FfmpegService` | Integration: real ffmpeg binário — metadados + frame | `src/video-worker/ffmpeg.service.integration-spec.ts` |
 
-**Dependencies:** SI-03.5 (upload flow), SI-03.6 (worker — must have a processed video to stream)
+**Dependencies:** SI-03.4 (consumo da fila), SI-03.6 (job producer), SI-03.3 (storage para vídeo/thumbnail)
 
 **Acceptance criteria:**
-- `GET /videos/:id` returns video metadata only when status is `'ready'`
-- `GET /videos/:id` returns 404 if video status is `'draft'` or `'error'`
-- `GET /videos/:id/view` returns a valid presigned streaming URL
-- The presigned URL can be used with MinIO to fetch byte ranges (206 Partial Content)
-- `GET /videos/:id/download` returns a presigned URL only for the video owner
-- Unauthenticated users cannot access download
+
+- Enfileirar um job `video-processing` resulta em video com `status: ready`, `durationSeconds`/`width`/`height`/`codec` populados e `thumbnailKey` preenchido no DB	
+- `video-worker` roda no Docker (compose) e consome jobs da mesma fila Redis que a API publica
+- Após 3 falhas de processamento, `status` vira `error` com `errorMessage` preenchido
+- Thumbnail `thumbnails/{videoId}.jpg` existe no MinIO após processamento bem-sucedido
+
+---
+
+### SI-03.8 — GET /videos/:id, /videos/:id/stream, /videos/:id/download
+
+**Description:** Expõe a consulta do vídeo (metadata + status) e os endpoints de streaming e download que retornam presigned GET URLs direto do MinIO, com suporte a HTTP Range nativo.
+
+**Route:** GET /videos/:id, GET /videos/:id/stream, GET /videos/:id/download
+**Test Specs:** _pending /plan-test-specs_
+
+**Technical actions:**
+
+1. Estender `videos.service.ts`:
+   - `getVideo(id)` — busca video, monta `thumbnailUrl` (presigned do `thumbnailKey` quando `ready`) e retorna shape do API Contracts
+   - `getStreamUrl(videoId)` — gera presigned GET com Range; bloqueia se `status !== 'ready'` (`VIDEO_NOT_READY`, per `phase-03-videos/TD-04b`)
+   - `getDownloadUrl(videoId)` — presigned GET com `response-content-disposition=attachment` (per `phase-03-videos/TD-04b`)
+2. Estender `videos.controller.ts` — `@Get(':id')`, `@Get(':id/stream')`, `@Get(':id/download')`
+3. Aplicar decorators OpenAPI nos 3 endpoints (per `## Inherited Decisions Detail` → openapi-docs-nestjs/TD-01/02/03)
+4. Verificar range: presigned URL responde `206` para `Range` e `200` sem Range — comportamento nativo MinIO/S3 (per `phase-03-videos/TD-04b`)
+
+**Tests:**
+
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `VideosService` (get/stream/download) | Unit: branch — status não-ready, video não pertence | `src/videos/videos.service.spec.ts` |
+| `GET /videos/:id` | E2E: retorna metadata/status e thumbnailUrl quando ready | `test/videos-get.e2e-spec.ts` |
+| `GET /videos/:id/stream` + `/download` | E2E: presigned URL é assinada e faz GET com 206/attachment | `test/videos-stream.e2e-spec.ts` |
+
+**Dependencies:** SI-03.3 (presigned GET), SI-03.5 (service/controller base), SI-03.7 (para estado ready)
+
+**Acceptance criteria:**
+
+- `GET /videos/:id` com JWT retorna `200` com `status`, metadados e `thumbnailUrl` quando `ready`
+- `GET /videos/:id/stream` de video `ready` retorna presigned URL que pode ser acessada com `Range` produzindo `206 Partial Content`
+- `GET /videos/:id/stream` de video não-ready retorna `409 VIDEO_NOT_READY`
+- `GET /videos/:id/download` retorna presigned URL cujo `content-disposition` é `attachment`
+- `GET /videos/:id` de video de outro canal retorna `403 FORBIDDEN`
 
 ---
 
@@ -416,157 +279,207 @@ Deliver the video pipeline for StreamTube — upload files up to 10GB without bl
 
 ### Data Model
 
-**New entities:**
+#### Video
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                       videos                                  │
-├─────────────────────────────────────────────────────────────┤
-│ id              │ uuid (PK) │ DEFAULT uuid_generate_v4()     │
-│ title           │ varchar(255) │ NOT NULL                    │
-│ description     │ text │ nullable                            │
-│ status          │ enum('draft','processing','ready','error') │
-│ storage_key     │ varchar(500) │ NOT NULL                    │
-│ thumbnail_key   │ varchar(500) │ nullable                    │
-│ file_size       │ bigint │ nullable                          │
-│ mime_type       │ varchar(50) │ nullable                     │
-│ duration        │ int │ nullable                             │
-│ width           │ int │ nullable                             │
-│ height          │ int │ nullable                             │
-│ codec           │ varchar(50) │ nullable                     │
-│ error_message   │ text │ nullable                            │
-│ channel_id      │ uuid (FK → channels.id) │ NOT NULL         │
-│ created_at      │ TIMESTAMP │ DEFAULT now()                   │
-│ updated_at      │ TIMESTAMP │ DEFAULT now()                   │
-├─────────────────────────────────────────────────────────────┤
-│ INDEXES: channel_id, status                                  │
-└─────────────────────────────────────────────────────────────┘
-```
+| Field | Type | Constraints |
+|-------|------|-------------|
+| id | uuid | PK, generated (uuid-ossp) |
+| channel_id | uuid | FK → `channel.id`, not null |
+| title | varchar(255) | nullable (populado após processamento) |
+| description | text | nullable |
+| status | varchar | enum ('draft','processing','ready','error'), not null, default 'draft' |
+| duration_seconds | int | nullable |
+| width | int | nullable |
+| height | int | nullable |
+| codec | varchar(50) | nullable |
+| file_size_bytes | bigint | nullable |
+| video_key | varchar(255) | not null — storage key `videos/{videoId}.{ext}` |
+| thumbnail_key | varchar(255) | nullable — storage key `thumbnails/{videoId}.jpg` |
+| mime_type | varchar(100) | not null |
+| error_message | text | nullable |
+| created_at | timestamptz | default now() |
+| updated_at | timestamptz | default now() |
 
-**Modified entities:**
+**Relations:** `Channel` has many `Video` (one-to-many, FK `channel_id`)
+**Indexes:** unique on `id`; index on `channel_id`
 
-- `channels` — add `@OneToMany(() => Video, video => video.channel)` relation (TypeScript only, no schema change)
+---
 
 ### API Contracts
 
-All endpoints prefixed with `/videos`.
+#### POST /videos/initiate (SI-03.N)
 
-| Method | Path | Auth | Description | Request | Response |
-|--------|------|------|-------------|---------|----------|
-| `POST` | `/videos` | Required (channel) | Initiate multipart upload | `{ title, fileName, fileSize, mimeType }` | `201 { videoId, uploadId, partSize, parts: [urls] }` |
-| `POST` | `/videos/:id/complete` | Required (owner) | Complete multipart upload | `{ parts: [{ partNumber, etag }] }` | `200 { status: 'processing' }` |
-| `POST` | `/videos/:id/abort` | Required (owner) | Abort upload (multipart cleanup) | — | `204` |
-| `GET` | `/videos/:id` | Public | Get video metadata | — | `200 VideoResponseDto` or `404` |
-| `GET` | `/videos/:id/view` | Public | Get streaming URL | — | `200 { streamUrl, expiresIn }` |
-| `GET` | `/videos/:id/download` | Required (owner) | Get download URL | — | `200 { downloadUrl, expiresIn }` |
+**Request headers:**
+- Authorization: Bearer {jwt}
+- Content-Type: application/json
 
-### Authorization Matrix
+**Request body:**
+- filename: string, required — original arquivo (ex: `minha-aula.mp4`)
+- mimeType: string, required
+- fileSize: number, required — bytes
 
-| Endpoint | Anonymous | Authenticated | Owner only |
-|----------|-----------|---------------|------------|
-| `POST /videos` | ❌ | ✅ | — |
-| `POST /videos/:id/complete` | ❌ | ✅ | ✅ (must own channel) |
-| `POST /videos/:id/abort` | ❌ | ✅ | ✅ (must own channel) |
-| `GET /videos/:id` | ✅ | ✅ | ✅ (anyone, if ready) |
-| `GET /videos/:id/view` | ✅ | ✅ | ✅ (anyone, if ready) |
-| `GET /videos/:id/download` | ❌ | ✅ | ✅ (must own channel) |
+**Response 201:**
+- video: { id (uuid), status: "draft", title, channelId }
+- uploadId: string (multipart upload id)
+- parts: [ { partNumber (number), presignedUrl (string) } ] — ~100 parts de 100MB
+- completionUrl: string — `POST /videos/:id/complete`
 
-**Note:** The JwtAuthGuard is global (from phase-02). Video endpoints that are public (`GET /videos/:id`, `GET /videos/:id/view`) must use `@Public()` decorator. The `Owner only` check is done in the service layer by comparing the authenticated user's channel ID with the video's `channelId`.
+**Error responses:**
+- 401 Unauthorized: token ausente/inválido
+- 413 FILE_TOO_BIG: quando `fileSize` excede 10GB
+- 400 validation error: body sem filename/mimeType/fileSize
 
-### Error Catalog
+---
 
-| Error Code | HTTP Status | Description |
-|------------|-------------|-------------|
-| `VIDEO_NOT_FOUND` | 404 | Video does not exist (or status is not ready) |
-| `VIDEO_NOT_READY` | 409 | Video is not in a playable state (draft/processing/error) |
-| `VIDEO_INVALID_STATUS` | 409 | Cannot perform operation on current status (e.g., completing a non-draft video) |
-| `VIDEO_UPLOAD_FAILED` | 500 | MinIO multipart upload failed |
-| `VIDEO_PROCESSING_FAILED` | 500 | Worker processing failed |
-| `VIDEO_FILE_TOO_LARGE` | 413 | File size exceeds 10GB limit |
-| `VIDEO_NOT_OWNER` | 403 | User does not own the video's channel |
+#### POST /videos/:id/complete (SI-03.N)
 
-### Events/Messages
+**Request headers:**
+- Authorization: Bearer {jwt}
+- Content-Type: application/json
 
-**BullMQ Queue: `video-processing`**
+**Request body:**
+- parts: array of { partNumber: number, etag: string } — todos os parts concluídos
 
-Job payload:
-```typescript
-interface VideoProcessingJob {
-  videoId: string;
+**Response 204:** No content — dispara processamento em fila.
+
+**Error responses:**
+- 404 VIDEO_NOT_FOUND: video id inexistente
+- 403 FORBIDDEN: video pertence a outro canal
+- 400 INVALID_STATUS: video não está em `draft`
+
+---
+
+#### GET /videos/:id/stream (SI-03.N)
+
+**Request headers:**
+- Range: bytes=0- (opcional — HTTP Range nativo)
+
+**Response 200:**
+```json
+{ "streamUrl": "https://storage/videos/{videoId}.mp4?X-Amz-Expires=86400&X-Amz-Signature=..." }
+```
+*(presigned GET com Range; MinIO/S3 respondem `206 Partial Content` nativamente — per phase-03-videos/TD-04b)*
+
+**Error responses:**
+- 404 VIDEO_NOT_FOUND: video inexistente
+- 409 VIDEO_NOT_READY: status não é `ready`
+
+---
+
+#### GET /videos/:id/download (SI-03.N)
+
+**Request headers:**
+- Authorization: Bearer {jwt} _(opcional — acessível também após `ready`)_
+
+**Response 200:**
+```json
+{ "downloadUrl": "https://storage/videos/{videoId}.mp4?X-Amz-Expires=86400&response-content-disposition=attachment" }
+```
+
+**Error responses:**
+- 404 VIDEO_NOT_FOUND
+- 409 VIDEO_NOT_READY: status não é `ready`
+
+---
+
+#### GET /videos/:id (SI-03.N)
+
+**Request headers:**
+- Authorization: Bearer {jwt}
+
+**Response 200:**
+```json
+{
+  "id": "uuid",
+  "title": "string|null",
+  "description": "string|null",
+  "status": "draft|processing|ready|error",
+  "durationSeconds": 123 | null,
+  "width": 1920 | null,
+  "height": 1080 | null,
+  "thumbnailUrl": "presigned|url|null"
 }
 ```
 
-Job options:
-- `attempts: 3` — retry up to 3 times
-- `backoff: { type: 'exponential', delay: 60000 }` — 1min, then 5min, then 15min
+**Error responses:**
+- 404 VIDEO_NOT_FOUND
+- 403 FORBIDDEN: requester não é dono/qualquer echo
 
-Worker flow:
+---
+
+### Authorization Matrix
+
+| Endpoint | Anonymous | Authenticated | Owner |
+|----------|-----------|---------------|-------|
+| POST /videos/initiate | ✗ | ✓ | ✓ (cria video no próprio canal) |
+| POST /videos/:id/complete | ✗ | ✓ | ✓ (só o canal dono) |
+| GET /videos/:id/stream | ✗ | ✓ | ✓ |
+| GET /videos/:id/download | ✗ | ✓ | ✓ |
+| GET /videos/:id | ✗ | ✓ | ✓ |
+
+**Nota de produção (Fase 05):** o streaming público (anon) é uma capacidade da Fase 05 (página de visualização); nesta fase o acesso é autenticado.
+
+### Error Catalog
+
+| errorCode | HTTP | Trigger |
+|-----------|------|---------|
+| FILE_TOO_BIG | 413 | upload fileSize > 10GB |
+| VIDEO_NOT_FOUND | 404 | GET/POST video inexistente |
+| VIDEO_NOT_READY | 409 | stream/download quando status ≠ ready |
+| INVALID_STATUS | 400 | complete quando status ≠ draft |
+| FORBIDDEN | 403 | ação em video de outro canal |
+
+### Events/Messages
+
+#### video-processing.job
+
+**Payload:**
+
+```json
+{ "videoId": "uuid", "channelId": "uuid", "videoKey": "videos/{videoId}.{ext}" }
 ```
-1. Receive job → update video status to 'processing'
-2. Get presigned URL from StorageService
-3. ffprobe → extract metadata (duration, width, height, codec)
-4. ffmpeg → generate thumbnail JPEG buffer
-5. Upload thumbnail to MinIO (PutObject)
-6. Update video: status='ready', metadata fields, thumbnailKey
-7. On error: status='error', errorMessage set
-```
+
+**Producer:** `VideosService` (per `phase-03-videos/TD-01`)
+**Consumer:** `video-worker` — `@Processor('video-processing')` (per `phase-03-videos/TD-03`)
+**Trigger:** POST /videos/:id/complete
+**Delivery semantics:** at-least-once (BullMQ com 3 retries com backoff exponencial; após esgotar → status `error`, per `phase-03-videos/TD-05`)
+**Outputs do worker:** Popula duração/metadados + gera `thumbnails/{videoId}.jpg` e faz `UPDATE videos SET status='ready'` (ou `error` com `error_message`).
+
+---
 
 ## Dependency Map
 
-```
-SI-03.1 (Config + Docker)
-    ├── SI-03.2 (StorageModule)
-    │     └── SI-03.5 (Upload Flow)
-    │           ├── SI-03.3 (QueueModule)
-    │           │     └── SI-03.6 (Video Worker)
-    │           │           └── SI-03.7 (Stream + Download)
-    │           └── SI-03.4 (Video Entity)
-    │                 └── SI-03.5
-    └── SI-03.3
-```
+SI-03.1 (root — Infra/config/Docker)
+├── SI-03.2 — depends on SI-03.1 (entity usa pattern config; roda no mesmo compose)
+├── SI-03.3 — depends on SI-03.1 (config storage + service minio)
+├── SI-03.4 — depends on SI-03.1 (config queue + service redis)
+│   └── SI-03.7 — depends on SI-03.4 (consome fila) + SI-03.3 (storage) + SI-03.6 (job producer)
+SI-03.5 — depends on SI-03.2, SI-03.3, SI-03.4 (entity + storage + fila)
+└── SI-03.6 — depends on SI-03.5 (module/service base) + SI-03.4 (enfileira)
+    └── SI-03.7 — (acima, cross-ref via SI-03.6)
+SI-03.8 — depends on SI-03.3 (presigned GET) + SI-03.5 (service base) + SI-03.7 (estado ready)
 
-**Flow of execution:**
-1. SI-03.1 — foundation (no deps)
-2. SI-03.2 → depends on 03.1
-3. SI-03.3 → depends on 03.1
-4. SI-03.4 → depends on 03.1 (app.module.ts has DB config)
-5. SI-03.5 → depends on 03.2, 03.3, 03.4
-6. SI-03.6 → depends on 03.2, 03.3, 03.5
-7. SI-03.7 → depends on 03.5, 03.6 (needs processed video)
+Ordering de execução: SI-03.1 → {SI-03.2, SI-03.3, SI-03.4} → SI-03.5 → SI-03.6 → SI-03.7 → SI-03.8
+
+---
 
 ## Deliverables
 
-1. **Infrastructure:**
-   - Docker Compose with MinIO, Redis, and video-worker services
-   - Dockerfile.worker with FFmpeg
-   - Named volumes for MinIO persistent storage
+- [ ] SI-03.1 — Infra: dependências, config namespaces e Docker Compose
+- [ ] SI-03.2 — Entidade Video + migration CreateVideos
+- [ ] SI-03.3 — StorageModule com MinIO (S3)
+- [ ] SI-03.4 — QueueModule com BullMQ
+- [ ] SI-03.5 — VideosModule + POST /videos/initiate (pré-cadastro + multipart)
+- [ ] SI-03.6 — POST /videos/:id/complete (multipart completo + enfileirar)
+- [ ] SI-03.7 — Video Worker (FFmpeg): metadados + thumbnail + update DB
+- [ ] SI-03.8 — GET /videos/:id, /videos/:id/stream, /videos/:id/download
 
-2. **Backend modules:**
-   - `videos/` — entity, controller, service, DTOs
-   - `storage/` — MinIO/S3 client (presigned URLs)
-   - `queue/` — BullMQ queue (job publishing)
+**Full test suites:**
 
-3. **Worker:**
-   - `video-worker/` — main.ts, video-processor.ts, ffmpeg.service.ts
-
-4. **Config:**
-   - `storage.config.ts` — MinIO config namespace
-   - `queue.config.ts` — Redis/queue config namespace
-   - Updated `env.validation.ts` with new vars
-   - Updated `.env.example` with storage and queue vars
-
-5. **Database:**
-   - Migration creating `videos` table
-   - Updated `channels` entity with OneToMany relation
-
-6. **Tests:**
-   - Storage: integration tests with real MinIO
-   - Queue: integration tests with real Redis
-   - Video entity: integration tests with real DB
-   - Upload flow: unit + integration + e2e
-   - Worker: integration tests with real MinIO + Redis + FFmpeg
-   - Streaming/download: e2e tests
-
-7. **Documentation:**
-   - Updated project `CLAUDE.md` with video module section
-   - Updated `nestjs-project/CLAUDE.md` with new commands and services
+- [ ] Testes de unidade/integração passam (`cd nestjs-project && npm test`)
+- [ ] Testes de integração passam (`cd nestjs-project && npm run test:integration`)
+- [ ] Testes E2E passam (`cd nestjs-project && npm run test:e2e`)
+- [ ] Type check passa (`cd nestjs-project && npx tsc --noEmit`)
+- [ ] Lint passa (`cd nestjs-project && npm run lint`)
+- [ ] `docker compose up -d` sobe a API, MinIO, Redis e video-worker sem erro
+- [ ] Supersizing: upload > 10GB rejeitado; upload + streaming + download funcionais end-to-end
