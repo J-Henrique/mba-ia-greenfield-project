@@ -26,10 +26,10 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 **Technical actions:**
 
 1. Instalar dependências: `npm i @nestjs/bullmq@^11.0.5 bullmq@^6.2.0 ioredis@^5.x @aws-sdk/client-s3@^3.x @aws-sdk/s3-request-presigner@^3.x` (per `phase-03-videos/TD-01`, `TD-02`)
-2. Criar `src/config/storage.config.ts` — `registerAs('storage', ...)` lendo `MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET`, `MINIO_USE_SSL`, `PRESIGNED_URL_EXPIRATION_SECONDS` (per `phase-03-videos/TD-02`)
-3. Criar `src/config/queue.config.ts` — `registerAs('queue', ...)` lendo `REDIS_HOST`, `REDIS_PORT` (per `phase-03-videos/TD-01`)
+2. Criar `src/config/storage.config.ts` — `registerAs('storage', ...)` lendo `MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET`, `MINIO_USE_SSL`, `PRESIGNED_URL_EXPIRATION_SECONDS`, `STORAGE_PART_SIZE_MB` (default 100 — per `phase-03-videos/TD-02`; parte configurável para testes usarem partes pequenas, per R8 do revisor independente)
+3. Criar `src/config/queue.config.ts` — `registerAs('queue', ...)` lendo `REDIS_HOST`, `REDIS_PORT`, `QUEUE_NAME` (default `video-processing` — per `phase-03-videos/TD-01`; nome de fila configurável para isolar a fila de testes do worker ao vivo, per R3)
 4. Estender `src/config/env.validation.ts` (Joi) com storage/queue env vars (per convenção phase 01)
-5. Adicionar ao `compose.yaml` os serviços `minio` (portas 9000/9001, `MINIO_ROOT_USER/PASSWORD`), `redis` (6379) e `video-worker` (Dockerfile.worker) (per `phase-03-videos/TD-01`, `TD-03`)
+5. Adicionar ao `compose.yaml` os serviços `minio`, `redis` e `video-worker`, com **healthchecks** em `minio` e `redis` e `depends_on` do worker usando `condition: service_healthy` (per `phase-03-videos/TD-01`, `TD-03`; healthcheck R7)
 
 **Tests:** _(empty — Infra)_
 
@@ -46,15 +46,15 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 
 ### SI-03.2 — Entidade Video + migration CreateVideos
 
-**Description:** Cria a entidade `Video` com todos os campos do Data Model (status, storage keys, metadados) ligada ao `Channel`, e a migration que materializa a tabela.
+**Description:** Cria a entidade `Video` com todos os campos do Data Model (status, storage keys, metadados) ligada ao `Channel`, e a migration que materializa a tabela (incluindo garantia da extensão `uuid-ossp`).
 
 **Technical actions:**
 
 1. Criar `src/videos/entities/video.entity.ts` — campos do Data Model: `id` (uuid, PK), `channelId` (FK → channel), `title`, `description`, `status` (enum draft/processing/ready/error, default 'draft'), `durationSeconds`, `width`, `height`, `codec`, `fileSizeBytes`, `videoKey`, `thumbnailKey`, `mimeType`, `errorMessage`, timestamps (per `phase-03-videos/TD-04a` — URL única UUID, `TD-05` — ciclo de status)
 2. Definir relation `@ManyToOne(() => Channel)` — `channel_id` FK not null (per `## Inherited Conventions` — fase 02)
-3. Criar migration `<timestamp>-CreateVideos.ts` — `CREATE TABLE videos` com campos + FK p/ `channels` + índice em `channel_id`
+3. Criar migration `<timestamp>-CreateVideos.ts` — iniciar com `CREATE EXTENSION IF NOT EXISTS "uuid-ossp";` **dentro do `up()`** antes do `CREATE TABLE videos` (per R5 do revisor independente: a extensão NÃO é criada por nenhuma migration anterior — banco fresco quebraria `uuid_generate_v4()`), e depois `CREATE TABLE videos` com campos + FK p/ `channels` + índice em `channel_id`
 4. Registrar `Video` no `VideosModule` (import até hoje inexistente — referencia criado no SI-03.5) e expor via `TypeOrmModule.forFeature`
-5. Rodar `npm run migration:run` (dentro do container `nestjs-api`) e verificar tabela criada
+5. Rodar `npm run migration:run` (dentro do container `nestjs-api`) e verificar tabela criada + `pg_extension` contém `uuid-ossp`
 
 **Tests:**
 
@@ -67,9 +67,40 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 **Acceptance criteria:**
 
 - Migration cria `videos` com `channel_id` FK not null e índice em `channel_id`
+- O `up()` da migration inclui `CREATE EXTENSION IF NOT EXISTS "uuid-ossp"` — em banco fresco, `uuid_generate_v4()` funciona (R5)
 - `status` default é `draft`; enum aceita draft/processing/ready/error
 - `id` é uuid gerado via uuid-ossp
 - `INSERT INTO videos` sem channel_id falha (constraint FK)
+
+---
+
+### SI-03.2.1 — Atualizar suíte de teste existente para a tabela `videos` (auto-split from SI-03.2)
+
+**Description:** Ajusta os helpers de teste e o teste de migrações da Fase 01/02 para acomodar a nova tabela `videos`. Sem este SI, a suíte existente **quebra** (critério de reprovação). Gerado para cobrir o R6 do revisor independente.
+
+**Technical actions:**
+
+1. Atualizar `src/test/create-test-data-source.ts` — adicionar `videos` à rotina `cleanAllTables` (limpeza entre testes; sem isso, dados de vídeo vazam entre suites e violam FK — R6)
+2. Atualizar `src/database/migrations.integration-spec.ts`:
+   - a contagem esperada de migrations muda de **2 → 3** (`toHaveLength(3)`) (R6)
+   - adicionar `videos` à lista de tabelas esperadas após as migrations
+   - adicionar `DROP TYPE IF EXISTS videos_status_enum` na limpeza final (o enum da tabela `videos` não existia antes — R6)
+3. Rodar `npm run test` e `npm run test:integration` (no container `nestjs-api`) para confirmar que a suíte existente segue verde após a inclusão da tabela
+
+**Tests:**
+
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| Helpers de teste (`cleanAllTables`) | Integration: limpa `videos` + tabelas existentes | `src/test/create-test-data-source.ts` (exercised por toda a suíte) |
+| Registro de migrations | Integration: 3 migrations rodadas, lista de tabelas correta, enum limpo | `src/database/migrations.integration-spec.ts` |
+
+**Dependencies:** SI-03.2 (cria a tabela `videos` que este SI acomoda)
+
+**Acceptance criteria:**
+
+- `npm run test:integration` passa com a nova contagem (3 migrations) e sem vazamento entre suites
+- `cleanAllTables` remove registros de `videos` (e tabelas dependentes)
+- A suíte completa da Fase 01/02 continua verde após a inclusão
 
 ---
 
@@ -80,7 +111,7 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 **Technical actions:**
 
 1. Criar `src/storage/storage.module.ts` — `@Module({ imports: [ConfigModule] })`, provider global `S3Client` custom (endpoint `http://minio:9000`, `forcePathStyle: true`, credentials do `storage.config`, per `phase-03-videos/TD-02`)
-2. Criar `src/storage/storage.service.ts` — `createMultipartUpload`, `generatePresignedPartUrls`, `completeMultipartUpload`, `abortMultipartUpload` (limpeza de upload incompleto — não completado / cancelado), `uploadThumbnail` (PUT do thumbnail no MinIO), `generatePresignedGetUrl` (com range para stream e `response-content-disposition=attachment` para download, expiração 24h, per `phase-03-videos/TD-02`, `TD-04b`)
+2. Criar `src/storage/storage.service.ts` — `createMultipartUpload`, `generatePresignedPartUrls` (part size vindo de `STORAGE_PART_SIZE_MB` do config — R8), `completeMultipartUpload`, `abortMultipartUpload` (limpeza de upload incompleto — per R1-residual, implementar agora já que o AC de abort existe), `uploadThumbnail` (PUT do thumbnail no MinIO), `generatePresignedGetUrl` (com range para stream e `response-content-disposition=attachment` para download, expiração 24h, per `phase-03-videos/TD-02`, `TD-04b`)
 3. Criar `src/storage/bucket.init.ts` (ou equivalente) — cria o bucket `streamtube-videos` na inicialização se não existir (per convenção Docker — rodar dentro do container)
 4. Registrar `StorageModule` no `AppModule`
 5. Garantir `ensure-bucket` no boot da API (lifecycle `OnModuleInit`)
@@ -109,7 +140,7 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 
 **Technical actions:**
 
-1. Criar `src/queue/queue.module.ts` — `BullModule.forRootAsync({ useFactory: queueConfig })` (host/port do `queue.config`, per `phase-03-videos/TD-01`) + `BullModule.registerQueue({ name: 'video-processing' })`
+1. Criar `src/queue/queue.module.ts` — `BullModule.forRootAsync({ useFactory: queueConfig })` (host/port e `QUEUE_NAME` do `queue.config`, per `phase-03-videos/TD-01`) + `BullModule.registerQueue({ name: queueName })` usando o valor de `QUEUE_NAME` (R3 — nome de fila configurável para testes isolarem do worker ao vivo)
 2. Criar `src/queue/queue.service.ts` — `publishProcessingJob({ videoId, channelId, videoKey })` com `queue.add()` e retry config (`attempts: 3`, backoff exponencial, per `phase-03-videos/TD-01`, `TD-05`)
 3. Registrar `QueueModule` no `AppModule`
 4. Garantir `ioredis` apontando para Redis (containers `redis` no compose)
@@ -139,10 +170,12 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 
 **Technical actions:**
 
-1. Criar `src/videos/videos.module.ts` — `TypeOrmModule.forFeature([Video])`, importa `StorageModule` + `QueueModule`, providers do service, declara controller (per `## Inherited Conventions` — estrutura de módulo fase 02)
-2. Criar `src/videos/videos.service.ts` — `initiateUpload(channelId, dto)`:
-   - `repo.save()` cria `Video` com `status: 'draft'`, `videoKey: videos/{id}.{ext}`, timestamps (per `phase-03-videos/TD-05`)
-   - chama `storageService.createMultipartUpload` + `generatePresignedPartUrls` (100MB/parte, per `phase-03-videos/TD-02`)
+1. Criar `src/videos/videos.module.ts` — `TypeOrmModule.forFeature([Video])`, importa `StorageModule` + `QueueModule` + **`ChannelsModule`** (para resolver o canal do usuário), providers do service, declara controller (per `## Inherited Conventions` — estrutura de módulo fase 02)
+2. Adicionar a `src/channels/channels.service.ts` o método **`findByUserId(userId)`** que retorna o `Channel` do usuário (ou lança `CHANNEL_NOT_FOUND`) — R1: o JWT carrega apenas `{ sub: userId, email }`; sem esse método não há como descobrir o canal dono (decisão aprovada: opção (a) — serviço de vídeos pergunta ao serviço de canais)
+3. Criar `src/videos/videos.service.ts` — `initiateUpload(userId, dto)`:
+   - resolve o canal via `channelsService.findByUserId(userId)` (R1)
+   - `repo.save()` cria `Video` com `status: 'draft'`, `channelId` (do canal resolvido), `videoKey: videos/{id}.{ext}`, `fileSizeBytes` (do dto), timestamps (per `phase-03-videos/TD-05`)
+   - chama `storageService.createMultipartUpload` + `generatePresignedPartUrls` (parte do `STORAGE_PART_SIZE_MB`, per `phase-03-videos/TD-02`, R8)
    - retorna `{ video, uploadId, parts, completionUrl }` (per API Contracts)
 3. Criar `src/videos/initiate-upload.dto.ts` — `filename`, `mimeType`, `fileSize` com validação (`fileSize <= 10GB`, `class-validator`, per `## Inherited Decisions Detail` phase-02/TD-06)
 4. Criar `src/videos/videos.controller.ts` — `@Post('initiate')` guardado por JWT (global, per fase 02), injeta `@CurrentUser()`, chama `videosService.initiate`
@@ -177,7 +210,7 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 **Technical actions:**
 
 1. Estender `videos.service.ts` — `completeUpload(userId, videoId, dto)`:
-   - verifica ownership (`channelId` do video == canal do user) e `status === 'draft'` (per `phase-03-videos/TD-05`)
+   - resolve o canal do user via `channelsService.findByUserId(userId)` e compara com `video.channelId` (R1 — ownership); se diverge → `FORBIDDEN`; se `status !== 'draft'` → `INVALID_STATUS` (per `phase-03-videos/TD-05`)
    - chama `storageService.completeMultipartUpload(uploadId, parts)` (per `phase-03-videos/TD-02`)
    - `repo.update` → `status: 'processing'` e chama `queueService.publishProcessingJob(...)` (per `phase-03-videos/TD-01`)
 2. Criar `src/videos/complete-upload.dto.ts` — `parts: [{ partNumber, etag }]` com validação
@@ -209,16 +242,18 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 
 **Technical actions:**
 
-1. Criar `src/video-worker/main.ts` — bootstrap do worker: connecta Redis (fila) + DB (TypeORM) e processa com `@Processor('video-processing')` (per `phase-03-videos/TD-03`)
-2. Criar `src/video-worker/video-processor.ts` — consumidor:
+1. Criar `src/video-worker/main.ts` — bootstrap do worker via `NestFactory.createApplicationContext(WorkerModule)` (contexto Nest necessário para `@Processor` e DI de Entity/Storage/Config — R7), que conecta Redis (fila `QUEUE_NAME`) + DB (TypeORM) e inicia o consumo (per `phase-03-videos/TD-03`)
+2. Criar `src/video-worker/video.processor.ts` — consumidor BullMQ:
+   - estende `WorkerHost` e sobrescreve `process(job)` (padrão BullMQ com `@nestjs/bullmq` — verificar API no context7; `@Process()` é do Bull clássico, per R-note do revisor) — registrado via `@Processor(QUEUE_NAME)`
    - baixa/streama o video do MinIO via presigned URL (per `phase-03-videos/TD-03` — FFmpeg lê por HTTP Range)
    - ffprobe → `durationSeconds`, `width`, `height`, `codec` (per `phase-03-videos/TD-03`)
    - ffmpeg `-ss 4 -vframes 1` → thumbnail `thumbnails/{videoId}.jpg` (per `phase-03-videos/TD-03`)
    - `storageService.uploadThumbnail(videoId, buffer)` — grava `thumbnails/{videoId}.jpg` no MinIO + `repo.update` → `status: 'ready'` com metadados (per `phase-03-videos/TD-05`)
-   - retries inerentes ao BullMQ (3 tentativas); após esgotar → `status: 'error'` com `errorMessage` (per `phase-03-videos/TD-05`)
+   - **`@OnWorkerEvent('failed')`** — quando as 3 tentativas do BullMQ esgotam, marca `status: 'error'` com `errorMessage` do último erro (per `phase-03-videos/TD-05`; R7 — mecanismo de detecção de falha pós-retry)
 3. Criar `src/video-worker/ffmpeg.service.ts` — wrapper de `child_process` para `ffprobe` e `ffmpeg` (substitui fluente pelo CLI puro, per `phase-03-videos/TD-03`)
-4. Criar `Dockerfile.worker` — base Node do projeto + `apt-get install ffmpeg`; entrypoint `node dist/video-worker/main.js` (per `phase-03-videos/TD-03`, resolved in I-02/I-06)
-5. Registrar `video-worker` no `compose.yaml` (image próprio, depends_on redis + minio, command `npm run start:worker` custom ou node dist)
+4. Criar `Dockerfile.worker` — base Node do projeto + `apt-get install ffmpeg`; entrypoint `node dist/video-worker/main.js` (per `phase-03-videos/TD-03`, resolved in I-02/I-06). A imagem recebe o `dist` via **build próprio (COPY `dist` do build stage)** — não depende do bind mount do container da API (R7)
+5. Adicionar ao `package.json` o script **`start:worker`** — `nest start --entryFile video-worker/main` ou `node dist/video-worker/main.js` (per R7 — o script não existe hoje) e registrar `video-worker` no `compose.yaml` com `depends_on: { minio: {condition: service_healthy}, redis: {condition: service_healthy} }` e `command: npm run start:worker`
+6. **Instalar FFmpeg no `Dockerfile.dev`** (container da API) — `apt-get install -y ffmpeg` — para que `ffmpeg.service.integration-spec.ts` e `video-processor.integration-spec.ts` rodem dentro do container `nestjs-api` nos testes (R7)
 
 **Tests:**
 
@@ -254,14 +289,14 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 2. Estender `videos.controller.ts` — `@Get(':id')`, `@Get(':id/stream')`, `@Get(':id/download')`
 3. Aplicar decorators OpenAPI nos 3 endpoints (per `## Inherited Decisions Detail` → openapi-docs-nestjs/TD-01/02/03)
 4. Verificar range: presigned URL responde `206` para `Range` e `200` sem Range — comportamento nativo MinIO/S3 (per `phase-03-videos/TD-04b`)
+5. Rodar **`npm run openapi:export`** e commitar o `openapi.json` regenerado (R9 — o contrato OpenAPI da fase 03 precisa refletir os novos endpoints; drop inconsistência "doc que cite comportamento inexistente")
 
 **Tests:**
 
 | Artifact | Layer | Test file |
 |----------|-------|-----------|
 | `VideosService` (get/stream/download) | Unit: branch — status não-ready, video não pertence | `src/videos/videos.service.spec.ts` |
-| `GET /videos/:id` | E2E: retorna metadata/status e thumbnailUrl quando ready | `test/videos-get.e2e-spec.ts` |
-| `GET /videos/:id/stream` + `/download` | E2E: presigned URL é assinada e faz GET com 206/attachment | `test/videos-stream.e2e-spec.ts` |
+| `GET /videos/:id` + stream + download | E2E (via `specs/videos-stream.plan.md`) | `test/videos-stream.e2e-spec.ts` |
 
 **Dependencies:** SI-03.3 (presigned GET), SI-03.5 (service/controller base), SI-03.7 (para estado ready)
 
@@ -285,7 +320,7 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 |-------|------|-------------|
 | id | uuid | PK, generated (uuid-ossp) |
 | channel_id | uuid | FK → `channel.id`, not null |
-| title | varchar(255) | nullable (populado após processamento) |
+| title | varchar(255) | nullable (populado na Fase 04 — edição de vídeos; a Fase 03 NÃO extrai título) |
 | description | text | nullable |
 | status | varchar | enum ('draft','processing','ready','error'), not null, default 'draft' |
 | duration_seconds | int | nullable |
@@ -451,15 +486,16 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 
 SI-03.1 (root — Infra/config/Docker)
 ├── SI-03.2 — depends on SI-03.1 (entity usa pattern config; roda no mesmo compose)
+│   └── SI-03.2.1 — depends on SI-03.2 (suíte acomoda a tabela `videos`)
 ├── SI-03.3 — depends on SI-03.1 (config storage + service minio)
 ├── SI-03.4 — depends on SI-03.1 (config queue + service redis)
 │   └── SI-03.7 — depends on SI-03.4 (consome fila) + SI-03.3 (storage) + SI-03.6 (job producer)
-SI-03.5 — depends on SI-03.2, SI-03.3, SI-03.4 (entity + storage + fila)
+SI-03.5 — depends on SI-03.2, SI-03.3, SI-03.4 (entity + storage + fila) + ChannelsModule (R1)
 └── SI-03.6 — depends on SI-03.5 (module/service base) + SI-03.4 (enfileira)
     └── SI-03.7 — (acima, cross-ref via SI-03.6)
 SI-03.8 — depends on SI-03.3 (presigned GET) + SI-03.5 (service base) + SI-03.7 (estado ready)
 
-Ordering de execução: SI-03.1 → {SI-03.2, SI-03.3, SI-03.4} → SI-03.5 → SI-03.6 → SI-03.7 → SI-03.8
+Ordering de execução: SI-03.1 → {SI-03.2 → SI-03.2.1, SI-03.3, SI-03.4} → SI-03.5 → SI-03.6 → SI-03.7 → SI-03.8
 
 ---
 

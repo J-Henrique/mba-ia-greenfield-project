@@ -16,7 +16,7 @@ Os endpoints de leitura expõem o vídeo processado: `GET /videos/:id` retorna m
 
 ### 1. Consulta de vídeo (metadados)
 
-**Setup:** `beforeEach` limpa tabelas de teste; bootstrap com `AppModule` + supertest; seed de vídeos `ready` e não-`ready` de um canal dono + token do dono e token de outro canal.
+**Setup:** `beforeEach` limpa tabelas de teste; bootstrap com `AppModule` + supertest; seed de vídeos `ready` e não-`ready` de um canal dono + token do dono e token de outro canal. `beforeEach` também chama `throttlerStorage.storage.clear()` (R4 — limpa o contador do rate limiter global de 10 req/min entre testes; mesmo padrão do `auth.e2e-spec.ts`).
 
 #### 1.1. get-video-ready
 

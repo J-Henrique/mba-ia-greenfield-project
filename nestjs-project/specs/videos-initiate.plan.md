@@ -16,7 +16,7 @@ O endpoint `POST /videos/initiate` inicia o upload de um vídeo de até 10GB. Au
 
 ### 1. Iniciação de upload
 
-**Setup:** `beforeEach` limpa as tabelas de teste (DELETE FROM videos/channels); bootstrap do módulo de teste com `Test.createTestingModule({ imports: [AppModule] })` + supertest; token JWT válido de um canal dono autenticado.
+**Setup:** `beforeEach` limpa as tabelas de teste (DELETE FROM videos/channels), chama `throttlerStorage.storage.clear()` (R4 — limpa o contador do rate limiter global de 10 req/min entre testes; mesmo padrão do `auth.e2e-spec.ts`) e bootstrap do módulo de teste com `Test.createTestingModule({ imports: [AppModule] })` + supertest; token JWT válido de um canal dono autenticado.
 
 #### 1.1. initiate-valid-upload
 
