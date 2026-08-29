@@ -135,7 +135,7 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 **Description:** Cria o `VideosModule` completo (entity, service, controller) e implementa o endpoint de iniciação de upload: pré-registra o vídeo como `draft`, inicia multipart no MinIO e retorna as presigned URLs das partes.
 
 **Route:** POST /videos/initiate
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-initiate.plan.md`
 
 **Technical actions:**
 
@@ -172,7 +172,7 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 **Description:** Implementa a conclusão do upload multipart: consolida as partes no MinIO, atualiza o video para `processing` e publica o job na fila `video-processing`.
 
 **Route:** POST /videos/:id/complete
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-complete.plan.md`
 
 **Technical actions:**
 
@@ -243,7 +243,7 @@ Entregar o pipeline de vídeos do StreamTube — servico de armazenamento (MinIO
 **Description:** Expõe a consulta do vídeo (metadata + status) e os endpoints de streaming e download que retornam presigned GET URLs direto do MinIO, com suporte a HTTP Range nativo.
 
 **Route:** GET /videos/:id, GET /videos/:id/stream, GET /videos/:id/download
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-stream.plan.md`
 
 **Technical actions:**
 
