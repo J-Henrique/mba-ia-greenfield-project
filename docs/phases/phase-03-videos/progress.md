@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 3/9 completed
+**SIs:** 4/9 completed
 
 ### SI-03.1 — Infra: dependências, config namespaces e Docker Compose
 - **Status:** completed
@@ -25,9 +25,12 @@
   - O teste `should revert the last migration and remove token tables` quebrava porque `undoLastMigration()` agora reverte `CreateVideos` (a nova última migration), não `CreateAuthTokens`. Corrigido para verificar remoção da tabela `videos` e atualizado o comentário no `afterAll`.
 
 ### SI-03.3 — StorageModule com MinIO (S3)
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 9 passing
+- **Observations:**
+  - `generatePresignedGetUrl` NÃO inclui Range nos signed headers — o cliente adiciona `Range` como header HTTP não assinado (padrão S3 para streaming). A URL pré-assinada com range assinado causa 400 AccessDenied no MinIO porque o fetch não envia o header que está em X-Amz-SignedHeaders.
+  - `BucketInitializer` (OnModuleInit) garante bucket na inicialização.
+  - Validação tsc e teste: OK.
 
 ### SI-03.4 — QueueModule com BullMQ
 - **Status:** pending
