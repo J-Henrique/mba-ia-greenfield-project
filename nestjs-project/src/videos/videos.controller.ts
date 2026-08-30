@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, Param, Post } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -10,6 +10,7 @@ import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/auth.types';
 import { InitiateUploadDto } from './dto/initiate-upload.dto';
+import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { VideosService } from './videos.service';
 
 @ApiTags('videos')
@@ -73,5 +74,45 @@ export class VideosController {
     @Body() dto: InitiateUploadDto,
   ) {
     return this.videosService.initiateUpload(user.sub, dto);
+  }
+
+  @Post(':id/complete')
+  @HttpCode(204)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Complete video upload',
+    description:
+      'Completes a multipart upload, transitions the video from draft to processing, and enqueues a processing job.',
+  })
+  @ApiResponse({
+    status: 204,
+    description: 'Upload completed, video is processing',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid status or validation failed',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden — video belongs to another channel',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async complete(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') videoId: string,
+    @Body() dto: CompleteUploadDto,
+  ): Promise<void> {
+    return this.videosService.completeUpload(user.sub, videoId, dto);
   }
 }

@@ -6,6 +6,7 @@ import {
   CreateMultipartUploadCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  ListMultipartUploadsCommand,
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
@@ -108,6 +109,21 @@ export class StorageService {
         UploadId: uploadId,
       }),
     );
+  }
+
+  /**
+   * Localiza o uploadId de um multipart em andamento pela chave do objeto.
+   * Usado por POST /videos/:id/complete — a chave é única (videos/{videoId}.{ext}),
+   * portanto o prefixo retorna no máximo um upload ativo.
+   */
+  async findMultipartUploadIdByKey(key: string): Promise<string> {
+    const response = await this.s3Client.send(
+      new ListMultipartUploadsCommand({ Bucket: this.bucket, Prefix: key }),
+    );
+    if (!response.Uploads || response.Uploads.length === 0) {
+      throw new Error(`No in-progress multipart upload found for key: ${key}`);
+    }
+    return response.Uploads[0].UploadId!;
   }
 
   /** Grava o thumbnail em `thumbnails/{videoId}.jpg`. */

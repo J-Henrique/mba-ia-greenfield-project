@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 6/9 completed
+**SIs:** 7/9 completed
 
 ### SI-03.1 — Infra: dependências, config namespaces e Docker Compose
 - **Status:** completed
@@ -49,9 +49,12 @@
   - `InitiateUploadResponse` exportado do service (TS4053: controller referencia tipo não exportado).
 
 ### SI-03.6 — POST /videos/:id/complete
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 11 passing (4 unit + 3 E2E)
+- **Observations:**
+  - `findMultipartUploadIdByKey` adicionado ao StorageService (ListMultipartUploadsCommand com Prefix) — necessário porque o complete não recebe uploadId do frontend; localiza o upload ativo pela video_key
+  - E2E executa ciclo multipart real: initiate → PUT real (5MB cada parte) → complete com ETags reais
+  - `CompleteUploadDto` com `@ValidateNested` + `@ArrayMinSize(1)`
 
 ### SI-03.7 — Video Worker (FFmpeg)
 - **Status:** pending

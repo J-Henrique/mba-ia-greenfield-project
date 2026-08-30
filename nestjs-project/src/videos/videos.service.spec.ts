@@ -2,24 +2,50 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ChannelsService } from '../channels/channels.service';
 import { Channel } from '../channels/entities/channel.entity';
-import { FileTooBigException } from '../common/exceptions/domain.exception';
+import {
+  FileTooBigException,
+  ForbiddenException,
+  InvalidStatusException,
+  VideoNotFoundException,
+} from '../common/exceptions/domain.exception';
+import { QueueService } from '../queue/queue.service';
 import { StorageService } from '../storage/storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
 import { VideosService } from './videos.service';
 import { MAX_FILE_SIZE_BYTES } from './dto/initiate-upload.dto';
+import type { CompleteUploadDto } from './dto/complete-upload.dto';
+
+const makeVideo = (overrides: Partial<Video> = {}): Video =>
+  Object.assign(new Video(), {
+    id: 'video-id',
+    channel_id: 'channel-id',
+    title: null,
+    description: null,
+    status: VideoStatus.DRAFT,
+    video_key: 'videos/video-id.mp4',
+    mime_type: 'video/mp4',
+    created_at: new Date(),
+    updated_at: new Date(),
+    ...overrides,
+  });
 
 describe('VideosService', () => {
   let service: VideosService;
   let videoRepository: {
     create: jest.Mock;
     save: jest.Mock;
+    findOne: jest.Mock;
+    update: jest.Mock;
   };
   let channelsService: { findByUserId: jest.Mock };
   let storageService: {
     getPartSizeBytes: jest.Mock;
     createMultipartUpload: jest.Mock;
     generatePresignedPartUrls: jest.Mock;
+    findMultipartUploadIdByKey: jest.Mock;
+    completeMultipartUpload: jest.Mock;
   };
+  let queueService: { publishProcessingJob: jest.Mock };
 
   const channel: Channel = Object.assign(new Channel(), {
     id: 'channel-id',
@@ -29,10 +55,10 @@ describe('VideosService', () => {
     description: null,
   });
 
-  const dto = {
+  const initiateDto = {
     filename: 'aula.mp4',
     mimeType: 'video/mp4',
-    fileSize: 200_000_000, // 200MB -> 2 parts of 100MB
+    fileSize: 200_000_000,
   };
 
   beforeEach(async () => {
@@ -44,6 +70,8 @@ describe('VideosService', () => {
         created_at: new Date(),
         updated_at: new Date(),
       })),
+      findOne: jest.fn().mockResolvedValue(makeVideo()),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     channelsService = {
       findByUserId: jest.fn().mockResolvedValue(channel),
@@ -54,6 +82,11 @@ describe('VideosService', () => {
       generatePresignedPartUrls: jest
         .fn()
         .mockResolvedValue(['https://presigned/1', 'https://presigned/2']),
+      findMultipartUploadIdByKey: jest.fn().mockResolvedValue('upload-id'),
+      completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
+    };
+    queueService = {
+      publishProcessingJob: jest.fn().mockResolvedValue('job-id'),
     };
 
     const module = await Test.createTestingModule({
@@ -62,6 +95,7 @@ describe('VideosService', () => {
         { provide: getRepositoryToken(Video), useValue: videoRepository },
         { provide: ChannelsService, useValue: channelsService },
         { provide: StorageService, useValue: storageService },
+        { provide: QueueService, useValue: queueService },
       ],
     }).compile();
 
@@ -70,7 +104,7 @@ describe('VideosService', () => {
 
   describe('initiateUpload', () => {
     it('pre-registers the video as draft and returns presigned part URLs', async () => {
-      const result = await service.initiateUpload('user-id', dto);
+      const result = await service.initiateUpload('user-id', initiateDto);
 
       expect(channelsService.findByUserId).toHaveBeenCalledWith('user-id');
 
@@ -109,7 +143,7 @@ describe('VideosService', () => {
     it('throws FILE_TOO_BIG when fileSize exceeds 10GB', async () => {
       await expect(
         service.initiateUpload('user-id', {
-          ...dto,
+          ...initiateDto,
           fileSize: MAX_FILE_SIZE_BYTES + 1,
         }),
       ).rejects.toThrow(FileTooBigException);
@@ -124,8 +158,8 @@ describe('VideosService', () => {
       ]);
 
       const result = await service.initiateUpload('user-id', {
-        ...dto,
-        fileSize: 50_000_000, // 50MB -> 1 part
+        ...initiateDto,
+        fileSize: 50_000_000,
       });
 
       expect(storageService.generatePresignedPartUrls).toHaveBeenCalledWith(
@@ -138,13 +172,94 @@ describe('VideosService', () => {
 
     it('propagates CHANNEL_NOT_FOUND when the user has no channel', async () => {
       channelsService.findByUserId.mockRejectedValue(
-        Object.assign(new Error('CHANNEL_NOT_FOUND'), { errorCode: 'CHANNEL_NOT_FOUND' }),
+        Object.assign(new Error('CHANNEL_NOT_FOUND'), {
+          errorCode: 'CHANNEL_NOT_FOUND',
+        }),
       );
 
-      await expect(service.initiateUpload('user-id', dto)).rejects.toThrow(
-        'CHANNEL_NOT_FOUND',
-      );
+      await expect(
+        service.initiateUpload('user-id', initiateDto),
+      ).rejects.toThrow('CHANNEL_NOT_FOUND');
       expect(videoRepository.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('completeUpload', () => {
+    const completeDto: CompleteUploadDto = {
+      parts: [
+        { partNumber: 1, etag: '"etag1"' },
+        { partNumber: 2, etag: '"etag2"' },
+      ],
+    };
+
+    it('completes multipart, updates status to processing, and enqueues job', async () => {
+      await service.completeUpload('user-id', 'video-id', completeDto);
+
+      expect(channelsService.findByUserId).toHaveBeenCalledWith('user-id');
+      expect(videoRepository.findOne).toHaveBeenCalledWith({
+        where: { id: 'video-id' },
+      });
+
+      expect(storageService.findMultipartUploadIdByKey).toHaveBeenCalledWith(
+        'videos/video-id.mp4',
+      );
+      expect(storageService.completeMultipartUpload).toHaveBeenCalledWith(
+        'upload-id',
+        'videos/video-id.mp4',
+        [
+          { PartNumber: 1, ETag: '"etag1"' },
+          { PartNumber: 2, ETag: '"etag2"' },
+        ],
+      );
+
+      expect(videoRepository.update).toHaveBeenCalledWith(
+        { id: 'video-id' },
+        { status: VideoStatus.PROCESSING },
+      );
+
+      expect(queueService.publishProcessingJob).toHaveBeenCalledWith({
+        videoId: 'video-id',
+        channelId: channel.id,
+        videoKey: 'videos/video-id.mp4',
+      });
+    });
+
+    it('throws VIDEO_NOT_FOUND when video does not exist', async () => {
+      videoRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.completeUpload('user-id', 'nonexistent', completeDto),
+      ).rejects.toThrow(VideoNotFoundException);
+
+      expect(storageService.completeMultipartUpload).not.toHaveBeenCalled();
+      expect(videoRepository.update).not.toHaveBeenCalled();
+      expect(queueService.publishProcessingJob).not.toHaveBeenCalled();
+    });
+
+    it('throws FORBIDDEN when video belongs to another channel', async () => {
+      videoRepository.findOne.mockResolvedValue(
+        makeVideo({ channel_id: 'other-channel-id' }),
+      );
+
+      await expect(
+        service.completeUpload('user-id', 'video-id', completeDto),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(storageService.completeMultipartUpload).not.toHaveBeenCalled();
+      expect(videoRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('throws INVALID_STATUS when video is not in draft', async () => {
+      videoRepository.findOne.mockResolvedValue(
+        makeVideo({ status: VideoStatus.PROCESSING }),
+      );
+
+      await expect(
+        service.completeUpload('user-id', 'video-id', completeDto),
+      ).rejects.toThrow(InvalidStatusException);
+
+      expect(storageService.completeMultipartUpload).not.toHaveBeenCalled();
+      expect(videoRepository.update).not.toHaveBeenCalled();
     });
   });
 });

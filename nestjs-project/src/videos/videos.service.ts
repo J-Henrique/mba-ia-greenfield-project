@@ -3,10 +3,17 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ChannelsService } from '../channels/channels.service';
-import { FileTooBigException } from '../common/exceptions/domain.exception';
+import {
+  FileTooBigException,
+  ForbiddenException,
+  InvalidStatusException,
+  VideoNotFoundException,
+} from '../common/exceptions/domain.exception';
+import { QueueService } from '../queue/queue.service';
 import { StorageService } from '../storage/storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
 import { InitiateUploadDto, MAX_FILE_SIZE_BYTES } from './dto/initiate-upload.dto';
+import type { CompleteUploadDto } from './dto/complete-upload.dto';
 
 export interface InitiateUploadResponse {
   video: {
@@ -27,7 +34,50 @@ export class VideosService {
     private readonly videoRepository: Repository<Video>,
     private readonly channelsService: ChannelsService,
     private readonly storageService: StorageService,
+    private readonly queueService: QueueService,
   ) {}
+
+  async completeUpload(
+    userId: string,
+    videoId: string,
+    dto: CompleteUploadDto,
+  ): Promise<void> {
+    const channel = await this.channelsService.findByUserId(userId);
+
+    const video = await this.videoRepository.findOne({
+      where: { id: videoId },
+    });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+    if (video.channel_id !== channel.id) {
+      throw new ForbiddenException();
+    }
+    if (video.status !== VideoStatus.DRAFT) {
+      throw new InvalidStatusException();
+    }
+
+    const uploadId = await this.storageService.findMultipartUploadIdByKey(
+      video.video_key,
+    );
+
+    await this.storageService.completeMultipartUpload(
+      uploadId,
+      video.video_key,
+      dto.parts.map((p) => ({ PartNumber: p.partNumber, ETag: p.etag })),
+    );
+
+    await this.videoRepository.update(
+      { id: videoId },
+      { status: VideoStatus.PROCESSING },
+    );
+
+    await this.queueService.publishProcessingJob({
+      videoId,
+      channelId: channel.id,
+      videoKey: video.video_key,
+    });
+  }
 
   async initiateUpload(
     userId: string,
