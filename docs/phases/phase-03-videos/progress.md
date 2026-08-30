@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 2/9 completed
+**SIs:** 3/9 completed
 
 ### SI-03.1 — Infra: dependências, config namespaces e Docker Compose
 - **Status:** completed
@@ -19,9 +19,10 @@
   - Timestamp da migration gerado como `1788123805882` (ms epoch atual). Verificado `pg_extension` (uuid-ossp presente) e o schema da tabela via `information_schema` — schema clips (16 colunas) conforme Data Model.
 
 ### SI-03.2.1 — Atualizar suíte de teste existente para a tabela `videos`
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 152 passing (full suite: 24 suites, 152 tests)
+- **Observations:**
+  - O teste `should revert the last migration and remove token tables` quebrava porque `undoLastMigration()` agora reverte `CreateVideos` (a nova última migration), não `CreateAuthTokens`. Corrigido para verificar remoção da tabela `videos` e atualizado o comentário no `afterAll`.
 
 ### SI-03.3 — StorageModule com MinIO (S3)
 - **Status:** pending
