@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 1/9 completed
+**SIs:** 2/9 completed
 
 ### SI-03.1 — Infra: dependências, config namespaces e Docker Compose
 - **Status:** completed
@@ -12,9 +12,11 @@
   - `.env.example` atualizado com as envs de storage/queue (item do decisions doc, encaixado aqui no SI de config).
 
 ### SI-03.2 — Entidade Video + migration CreateVideos
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 8 passing
+- **Observations:**
+  - A ação 4 do plano ("Registrar `Video` no `VideosModule`") é deferida para SI-03.5: o `VideosModule` ainda não existe (o próprio plano anota isso como "referencia criado no SI-03.5"). A entidade funciona standalone; o `forFeature` entra quando o módulo for criado.
+  - Timestamp da migration gerado como `1788123805882` (ms epoch atual). Verificado `pg_extension` (uuid-ossp presente) e o schema da tabela via `information_schema` — schema clips (16 colunas) conforme Data Model.
 
 ### SI-03.2.1 — Atualizar suíte de teste existente para a tabela `videos`
 - **Status:** pending
