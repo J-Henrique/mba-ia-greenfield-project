@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 5/9 completed
+**SIs:** 6/9 completed
 
 ### SI-03.1 — Infra: dependências, config namespaces e Docker Compose
 - **Status:** completed
@@ -41,9 +41,12 @@
   - Redis connection usa REDIS_HOST/REDIS_PORT do `queue.config`
 
 ### SI-03.5 — VideosModule + POST /videos/initiate
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 8 passing (4 unit + 1 module compile + 3 E2E)
+- **Observations:**
+  - `@Max` removido do `InitiateUploadDto`: o limite de 10GB é verificado apenas no service (`FileTooBigException` → 413 FILE_TOO_BIG), alinhado ao Error Catalog e ao spec E2E — com `@Max` o class-validator devolveria 400 VALIDATION_ERROR.
+  - `findByUserId` adicionado ao `ChannelsService` (lança `ChannelNotFoundException`); novas exceções de domínio (Video/Channel/FileTooBig/InvalidStatus/NotReady/Forbidden) adicionadas em `domain.exception.ts`.
+  - `InitiateUploadResponse` exportado do service (TS4053: controller referencia tipo não exportado).
 
 ### SI-03.6 — POST /videos/:id/complete
 - **Status:** pending

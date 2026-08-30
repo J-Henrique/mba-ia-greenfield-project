@@ -48,3 +48,39 @@ export class TokenReuseDetectedException extends DomainException {
     );
   }
 }
+
+export class ChannelNotFoundException extends DomainException {
+  constructor() {
+    super('CHANNEL_NOT_FOUND', 404, 'Channel not found');
+  }
+}
+
+export class FileTooBigException extends DomainException {
+  constructor() {
+    super('FILE_TOO_BIG', 413, 'File size exceeds the maximum allowed size of 10GB');
+  }
+}
+
+export class VideoNotFoundException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_FOUND', 404, 'Video not found');
+  }
+}
+
+export class VideoNotReadyException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_READY', 409, 'Video is not ready yet');
+  }
+}
+
+export class InvalidStatusException extends DomainException {
+  constructor() {
+    super('INVALID_STATUS', 400, 'Invalid video status for this operation');
+  }
+}
+
+export class ForbiddenException extends DomainException {
+  constructor() {
+    super('FORBIDDEN', 403, 'You do not have permission to perform this action');
+  }
+}
