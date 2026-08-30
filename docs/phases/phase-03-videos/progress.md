@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 4/9 completed
+**SIs:** 5/9 completed
 
 ### SI-03.1 — Infra: dependências, config namespaces e Docker Compose
 - **Status:** completed
@@ -33,9 +33,12 @@
   - Validação tsc e teste: OK.
 
 ### SI-03.4 — QueueModule com BullMQ
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 2 passing
+- **Observations:**
+  - `publishProcessingJob` enfileira com 3 tentativas e backoff exponencial (1s)
+  - Nome da fila configurável via `QUEUE_NAME` env (R3) — `queue.constants.ts` exporta `QUEUE_NAME` usado tanto no registro quanto na injeção
+  - Redis connection usa REDIS_HOST/REDIS_PORT do `queue.config`
 
 ### SI-03.5 — VideosModule + POST /videos/initiate
 - **Status:** pending
