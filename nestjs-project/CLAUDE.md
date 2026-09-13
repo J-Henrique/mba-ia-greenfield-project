@@ -32,8 +32,12 @@ docker compose exec nestjs-api npm run start:dev
 ```
 
 Services:
-- `nestjs-api` — NestJS API, port `3000`
+- `nestjs-api` — NestJS API, port `3000`  
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `minio` — S3-compatible object storage, API port `9000`, console port `9001`
+- `redis` — Redis 7 (BullMQ queue backend), port `6379`
+- `mailpit` — SMTP catch-all, SMTP port `1025`, web UI port `8025`
+- `video-worker` — FFmpeg video processing worker (separate NestJS ApplicationContext)
 
 All verification and teardown commands run on the **host machine**:
 
@@ -148,6 +152,78 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
+
+## Video Pipeline (Fase 03)
+
+### Modules
+
+| Module | Responsibility |
+|--------|---------------|
+| `StorageModule` | S3/MinIO client — presigned multipart upload, presigned GET (streaming/download), thumbnail upload |
+| `QueueModule` | BullMQ queue config + `QueueService.publishProcessingJob()` |
+| `VideosModule` | REST endpoints for video upload lifecycle (initiate → complete → stream/download) |
+| `WorkerModule` | Bootstrap as `NestFactory.createApplicationContext` — FFmpeg processing consumer |
+
+### Video endpoints
+
+All endpoints require JWT (global guard). Video access is scoped to **owner's channel**.
+
+| Method | Route | Response | Notes |
+|--------|-------|----------|-------|
+| `POST` | `/videos/initiate` | `201` — video draft + presigned part URLs | `Authorization: Bearer {jwt}` |
+| `POST` | `/videos/:id/complete` | `204` — marks processing + enqueues job | Validates ownership, status must be `draft` |
+| `GET` | `/videos/:id` | `200` — metadata + thumbnailUrl | Owner only |
+| `GET` | `/videos/:id/stream` | `200` — `{ streamUrl }` | Owner only, status must be `ready`; caller adds `Range` header |
+| `GET` | `/videos/:id/download` | `200` — `{ downloadUrl }` | Owner only, status must be `ready`; URL has `response-content-disposition=attachment` |
+
+### Video status lifecycle
+
+```
+draft ──(complete)──► processing ──(worker)──► ready
+                              │                    │
+                              └──(retries fail)──► error
+```
+
+- **draft**: pre-cadastrado, antes do upload
+- **processing**: upload concluído, esperando processamento do worker
+- **ready**: processado (metadados extraídos, thumbnail gerada)
+- **error**: todas as 3 tentativas de processamento esgotaram
+
+### Error Catalog
+
+| errorCode | HTTP | Trigger |
+|-----------|------|---------|
+| FILE_TOO_BIG | 413 | upload fileSize > 10GB |
+| VIDEO_NOT_FOUND | 404 | video inexistente |
+| VIDEO_NOT_READY | 409 | stream/download quando status ≠ ready |
+| INVALID_STATUS | 400 | complete quando status ≠ draft |
+| FORBIDDEN | 403 | ação em video de outro canal |
+
+### Object Storage (MinIO)
+
+- Single bucket: `streamtube-videos`
+- Key format: `videos/{videoId}.{ext}` (video files), `thumbnails/{videoId}.jpg` (thumbnails)
+- Part size: 100MB (configurable via `STORAGE_PART_SIZE_MB`)
+
+### Queue (BullMQ + Redis)
+
+- Queue name: `video-processing` (configurable via `QUEUE_NAME` env — R3)
+- Job payload: `{ videoId, channelId, videoKey }`
+- Retry: 3 attempts with exponential backoff (1s base)
+
+### Video Worker (FFmpeg)
+
+- Runs as a **separate container** (`video-worker`) with its own `Dockerfile.worker`
+- Bootstrap: `NestFactory.createApplicationContext(WorkerModule)` — no HTTP server
+- Steps: download video from MinIO via presigned URL → ffprobe (metadata) → ffmpeg (thumbnail JPEG) → upload thumbnail → update DB
+
+### Key Infrastructure
+
+| Service | Image | Purpose |
+|---------|-------|---------|
+| `minio` | `minio/minio` | S3-compatible storage (video files + thumbnails) |
+| `redis` | `redis:7-alpine` | BullMQ queue backend |
+| `video-worker` | Custom (`Dockerfile.worker`) | FFmpeg processing (consumes `video-processing` queue) |
 
 ## Code Conventions
 
