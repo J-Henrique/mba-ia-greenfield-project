@@ -70,7 +70,10 @@ export class FfmpegService {
    * Extrai um frame (thumbnail) do vídeo via `ffmpeg`, retornando o buffer JPG.
    * `-f image2pipe -` escreve a imagem na stdout, que é capturada como Buffer.
    */
-  async extractThumbnail(source: string, timestampSeconds = 4): Promise<Buffer> {
+  async extractThumbnail(
+    source: string,
+    timestampSeconds = 4,
+  ): Promise<Buffer> {
     const { stdout } = await execFileAsync(
       'ffmpeg',
       [

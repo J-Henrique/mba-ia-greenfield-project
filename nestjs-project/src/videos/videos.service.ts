@@ -7,12 +7,16 @@ import {
   FileTooBigException,
   ForbiddenException,
   InvalidStatusException,
+  VideoNotReadyException,
   VideoNotFoundException,
 } from '../common/exceptions/domain.exception';
 import { QueueService } from '../queue/queue.service';
 import { StorageService } from '../storage/storage.service';
 import { Video, VideoStatus } from './entities/video.entity';
-import { InitiateUploadDto, MAX_FILE_SIZE_BYTES } from './dto/initiate-upload.dto';
+import {
+  InitiateUploadDto,
+  MAX_FILE_SIZE_BYTES,
+} from './dto/initiate-upload.dto';
 import type { CompleteUploadDto } from './dto/complete-upload.dto';
 
 export interface InitiateUploadResponse {
@@ -77,6 +81,85 @@ export class VideosService {
       channelId: channel.id,
       videoKey: video.video_key,
     });
+  }
+
+  async getVideo(
+    videoId: string,
+    userId: string,
+  ): Promise<{
+    id: string;
+    title: string | null;
+    description: string | null;
+    status: VideoStatus;
+    durationSeconds: number | null;
+    width: number | null;
+    height: number | null;
+    thumbnailUrl: string | null;
+  }> {
+    const channel = await this.channelsService.findByUserId(userId);
+
+    const video = await this.videoRepository.findOne({
+      where: { id: videoId },
+    });
+    if (!video) throw new VideoNotFoundException();
+    if (video.channel_id !== channel.id) throw new ForbiddenException();
+
+    const thumbnailUrl =
+      video.status === VideoStatus.READY && video.thumbnail_key
+        ? await this.storageService.generatePresignedGetUrl(video.thumbnail_key)
+        : null;
+
+    return {
+      id: video.id,
+      title: video.title,
+      description: video.description,
+      status: video.status,
+      durationSeconds: video.duration_seconds,
+      width: video.width,
+      height: video.height,
+      thumbnailUrl,
+    };
+  }
+
+  async getStreamUrl(
+    videoId: string,
+    userId: string,
+  ): Promise<{ streamUrl: string }> {
+    const channel = await this.channelsService.findByUserId(userId);
+
+    const video = await this.videoRepository.findOne({
+      where: { id: videoId },
+    });
+    if (!video) throw new VideoNotFoundException();
+    if (video.channel_id !== channel.id) throw new ForbiddenException();
+    if (video.status !== VideoStatus.READY) throw new VideoNotReadyException();
+
+    return {
+      streamUrl: await this.storageService.generatePresignedGetUrl(
+        video.video_key,
+      ),
+    };
+  }
+
+  async getDownloadUrl(
+    videoId: string,
+    userId: string,
+  ): Promise<{ downloadUrl: string }> {
+    const channel = await this.channelsService.findByUserId(userId);
+
+    const video = await this.videoRepository.findOne({
+      where: { id: videoId },
+    });
+    if (!video) throw new VideoNotFoundException();
+    if (video.channel_id !== channel.id) throw new ForbiddenException();
+    if (video.status !== VideoStatus.READY) throw new VideoNotReadyException();
+
+    return {
+      downloadUrl: await this.storageService.generatePresignedGetUrl(
+        video.video_key,
+        { responseContentDisposition: 'attachment' },
+      ),
+    };
   }
 
   async initiateUpload(

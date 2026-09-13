@@ -57,9 +57,7 @@ describe('POST /videos/initiate (e2e)', () => {
     const authService = app.get(AuthService);
     // registra e confirma manualmente via banco (evita mock de email)
     const { id } = await authService.register({ email, password });
-    await dataSource
-      .getRepository(User)
-      .update(id, { is_confirmed: true });
+    await dataSource.getRepository(User).update(id, { is_confirmed: true });
     // login
     const loginRes = await request(app.getHttpServer())
       .post('/auth/login')
@@ -98,9 +96,7 @@ describe('POST /videos/initiate (e2e)', () => {
         .query('SELECT * FROM videos WHERE id = $1', [res.body.video.id]);
       expect(videos.length).toBe(1);
       expect(videos[0].status).toBe('draft');
-      expect(videos[0].video_key).toBe(
-        `videos/${res.body.video.id}.mp4`,
-      );
+      expect(videos[0].video_key).toBe(`videos/${res.body.video.id}.mp4`);
     });
 
     it('1.2 initiate-without-auth — returns 401', async () => {

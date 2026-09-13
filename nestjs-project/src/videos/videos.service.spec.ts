@@ -7,6 +7,7 @@ import {
   ForbiddenException,
   InvalidStatusException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { QueueService } from '../queue/queue.service';
 import { StorageService } from '../storage/storage.service';
@@ -44,6 +45,7 @@ describe('VideosService', () => {
     generatePresignedPartUrls: jest.Mock;
     findMultipartUploadIdByKey: jest.Mock;
     completeMultipartUpload: jest.Mock;
+    generatePresignedGetUrl: jest.Mock;
   };
   let queueService: { publishProcessingJob: jest.Mock };
 
@@ -84,6 +86,9 @@ describe('VideosService', () => {
         .mockResolvedValue(['https://presigned/1', 'https://presigned/2']),
       findMultipartUploadIdByKey: jest.fn().mockResolvedValue('upload-id'),
       completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
+      generatePresignedGetUrl: jest
+        .fn()
+        .mockResolvedValue('https://minio/presigned-url'),
     };
     queueService = {
       publishProcessingJob: jest.fn().mockResolvedValue('job-id'),
@@ -260,6 +265,126 @@ describe('VideosService', () => {
 
       expect(storageService.completeMultipartUpload).not.toHaveBeenCalled();
       expect(videoRepository.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getVideo', () => {
+    it('returns video metadata with thumbnailUrl when ready', async () => {
+      videoRepository.findOne.mockResolvedValue(
+        makeVideo({
+          status: VideoStatus.READY,
+          thumbnail_key: 'thumbnails/video-id.jpg',
+          duration_seconds: 120,
+          width: 1920,
+          height: 1080,
+          description: 'My video',
+        }),
+      );
+
+      const result = await service.getVideo('video-id', 'user-id');
+
+      expect(channelsService.findByUserId).toHaveBeenCalledWith('user-id');
+      expect(videoRepository.findOne).toHaveBeenCalledWith({
+        where: { id: 'video-id' },
+      });
+      expect(storageService.generatePresignedGetUrl).toHaveBeenCalledWith(
+        'thumbnails/video-id.jpg',
+      );
+      expect(result.status).toBe(VideoStatus.READY);
+      expect(result.durationSeconds).toBe(120);
+      expect(result.width).toBe(1920);
+      expect(result.height).toBe(1080);
+      expect(result.thumbnailUrl).toBe('https://minio/presigned-url');
+    });
+
+    it('returns null thumbnailUrl when video is not ready', async () => {
+      videoRepository.findOne.mockResolvedValue(
+        makeVideo({ status: VideoStatus.DRAFT }),
+      );
+
+      const result = await service.getVideo('video-id', 'user-id');
+
+      expect(result.thumbnailUrl).toBeNull();
+      expect(storageService.generatePresignedGetUrl).not.toHaveBeenCalled();
+    });
+
+    it('throws VIDEO_NOT_FOUND when video does not exist', async () => {
+      videoRepository.findOne.mockResolvedValue(null);
+
+      await expect(service.getVideo('nonexistent', 'user-id')).rejects.toThrow(
+        VideoNotFoundException,
+      );
+    });
+
+    it('throws FORBIDDEN when video belongs to another channel', async () => {
+      videoRepository.findOne.mockResolvedValue(
+        makeVideo({ channel_id: 'other-channel' }),
+      );
+
+      await expect(service.getVideo('video-id', 'user-id')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+  });
+
+  describe('getStreamUrl', () => {
+    it('returns a stream URL for a ready video', async () => {
+      videoRepository.findOne.mockResolvedValue(
+        makeVideo({ status: VideoStatus.READY }),
+      );
+
+      const result = await service.getStreamUrl('video-id', 'user-id');
+
+      expect(storageService.generatePresignedGetUrl).toHaveBeenCalledWith(
+        'videos/video-id.mp4',
+      );
+      expect(result.streamUrl).toBe('https://minio/presigned-url');
+    });
+
+    it('throws VIDEO_NOT_READY when video is not ready', async () => {
+      videoRepository.findOne.mockResolvedValue(
+        makeVideo({ status: VideoStatus.PROCESSING }),
+      );
+
+      await expect(service.getStreamUrl('video-id', 'user-id')).rejects.toThrow(
+        VideoNotReadyException,
+      );
+    });
+
+    it('throws FORBIDDEN for other channel', async () => {
+      videoRepository.findOne.mockResolvedValue(
+        makeVideo({ channel_id: 'other-channel', status: VideoStatus.READY }),
+      );
+
+      await expect(service.getStreamUrl('video-id', 'user-id')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+  });
+
+  describe('getDownloadUrl', () => {
+    it('returns a download URL with attachment for a ready video', async () => {
+      videoRepository.findOne.mockResolvedValue(
+        makeVideo({ status: VideoStatus.READY }),
+      );
+
+      const result = await service.getDownloadUrl('video-id', 'user-id');
+
+      expect(storageService.generatePresignedGetUrl).toHaveBeenCalledWith(
+        'videos/video-id.mp4',
+        { responseContentDisposition: 'attachment' },
+      );
+      expect(result.downloadUrl).toBe('https://minio/presigned-url');
+    });
+
+    it('throws VIDEO_NOT_READY when video is not ready', async () => {
+      videoRepository.findOne.mockResolvedValue(
+        makeVideo({ status: VideoStatus.ERROR }),
+      );
+
+      await expect(
+        service.getDownloadUrl('video-id', 'user-id'),
+      ).rejects.toThrow(VideoNotReadyException);
     });
   });
 });

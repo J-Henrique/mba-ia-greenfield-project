@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
-**Status:** in_progress
-**SIs:** 8/9 completed
+**Status:** completed
+**SIs:** 9/9 completed
 
 ### SI-03.1 — Infra: dependências, config namespaces e Docker Compose
 - **Status:** completed
@@ -67,6 +67,10 @@
   - Testes unitários do processor mockam todas as dependências (7 cenários: happy path + 4 falhas + 2 onFailed) — roda em <1s sem infra real
 
 ### SI-03.8 — GET /videos/:id, /videos/:id/stream, /videos/:id/download
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 22 passing (9 unit GET + 5 E2E stream + 8 preserved from previous SIs)
+- **Observations:**
+  - Ownership checks nos 3 endpoints (FORBIDDEN para outro canal)
+  - Stream exige `status === ready` (VIDEO_NOT_READY caso contrário)
+  - Download URL contém `response-content-disposition=attachment` no query string da presigned URL
+  - Suíte completa: 30 suites / 190 tests unit+int + 6 suites / 63 tests E2E

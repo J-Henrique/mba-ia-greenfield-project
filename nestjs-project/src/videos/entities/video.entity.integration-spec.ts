@@ -11,7 +11,8 @@ import { Video, VideoStatus } from './video.entity';
 
 const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
 
-const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 describe('Video entity (integration)', () => {
   let dataSource: DataSource;
@@ -35,14 +36,12 @@ describe('Video entity (integration)', () => {
 
   let userCounter = 0;
   async function createChannel(): Promise<Channel> {
-    const user = await dataSource
-      .getRepository(User)
-      .save(
-        dataSource.getRepository(User).create({
-          email: `v_user_${++userCounter}@example.com`,
-          password: 'hashed',
-        }),
-      );
+    const user = await dataSource.getRepository(User).save(
+      dataSource.getRepository(User).create({
+        email: `v_user_${++userCounter}@example.com`,
+        password: 'hashed',
+      }),
+    );
     return dataSource.getRepository(Channel).save(
       dataSource.getRepository(Channel).create({
         name: 'Channel',

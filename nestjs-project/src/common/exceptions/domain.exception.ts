@@ -57,7 +57,11 @@ export class ChannelNotFoundException extends DomainException {
 
 export class FileTooBigException extends DomainException {
   constructor() {
-    super('FILE_TOO_BIG', 413, 'File size exceeds the maximum allowed size of 10GB');
+    super(
+      'FILE_TOO_BIG',
+      413,
+      'File size exceeds the maximum allowed size of 10GB',
+    );
   }
 }
 
@@ -81,6 +85,10 @@ export class InvalidStatusException extends DomainException {
 
 export class ForbiddenException extends DomainException {
   constructor() {
-    super('FORBIDDEN', 403, 'You do not have permission to perform this action');
+    super(
+      'FORBIDDEN',
+      403,
+      'You do not have permission to perform this action',
+    );
   }
 }

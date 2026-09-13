@@ -1,4 +1,10 @@
-import { ArrayMinSize, IsInt, IsString, Min, ValidateNested } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsInt,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 class PartEntry {

@@ -40,9 +40,8 @@ export class VideoProcessor extends WorkerHost {
       `Probe done: ${metadata.durationSeconds}s, ${metadata.width}x${metadata.height}, ${metadata.codec}`,
     );
 
-    const thumbnailBuffer = await this.ffmpegService.extractThumbnail(
-      presignedUrl,
-    );
+    const thumbnailBuffer =
+      await this.ffmpegService.extractThumbnail(presignedUrl);
     const thumbnailKey = `thumbnails/${videoId}.jpg`;
     await this.storageService.uploadThumbnail(
       thumbnailKey,

@@ -59,17 +59,24 @@ describe('POST /videos/:id/complete (e2e)', () => {
     email: string,
   ): Promise<{ access_token: string; userId: string }> {
     const authService = app.get(AuthService);
-    const { id } = await authService.register({ email, password: 'password123' });
-    await dataSource.query('UPDATE users SET is_confirmed = true WHERE id = $1', [id]);
+    const { id } = await authService.register({
+      email,
+      password: 'password123',
+    });
+    await dataSource.query(
+      'UPDATE users SET is_confirmed = true WHERE id = $1',
+      [id],
+    );
     const loginRes = await request(app.getHttpServer())
       .post('/auth/login')
       .send({ email, password: 'password123' });
     return { access_token: loginRes.body.access_token, userId: id };
   }
 
-  async function runRealMultipartCycle(
-    token: string,
-  ): Promise<{ videoId: string; parts: { partNumber: number; etag: string }[] }> {
+  async function runRealMultipartCycle(token: string): Promise<{
+    videoId: string;
+    parts: { partNumber: number; etag: string }[];
+  }> {
     const initiateRes = await request(app.getHttpServer())
       .post('/videos/initiate')
       .set('Authorization', `Bearer ${token}`)
@@ -100,7 +107,8 @@ describe('POST /videos/:id/complete (e2e)', () => {
 
   describe('1. Upload completion', () => {
     it('1.1 complete-valid-upload — returns 204, marks processing, enqueues job', async () => {
-      const { access_token, userId } = await registerAndLogin('owner@example.com');
+      const { access_token, userId } =
+        await registerAndLogin('owner@example.com');
       const { videoId, parts } = await runRealMultipartCycle(access_token);
 
       const res = await request(app.getHttpServer())
@@ -129,10 +137,12 @@ describe('POST /videos/:id/complete (e2e)', () => {
     });
 
     it('1.2 complete-other-channel-forbidden — returns 403 FORBIDDEN', async () => {
-      const { access_token: ownerToken } = await registerAndLogin('owner2@example.com');
+      const { access_token: ownerToken } =
+        await registerAndLogin('owner2@example.com');
       const { videoId, parts } = await runRealMultipartCycle(ownerToken);
 
-      const { access_token: otherToken } = await registerAndLogin('other@example.com');
+      const { access_token: otherToken } =
+        await registerAndLogin('other@example.com');
 
       const res = await request(app.getHttpServer())
         .post(`/videos/${videoId}/complete`)
@@ -148,10 +158,10 @@ describe('POST /videos/:id/complete (e2e)', () => {
       const { videoId, parts } = await runRealMultipartCycle(access_token);
 
       // Force status to processing before completing
-      await dataSource.query(
-        'UPDATE videos SET status = $1 WHERE id = $2',
-        ['processing', videoId],
-      );
+      await dataSource.query('UPDATE videos SET status = $1 WHERE id = $2', [
+        'processing',
+        videoId,
+      ]);
 
       const res = await request(app.getHttpServer())
         .post(`/videos/${videoId}/complete`)

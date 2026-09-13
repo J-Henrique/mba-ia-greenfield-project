@@ -11,16 +11,27 @@ function makeRepository(): jest.Mocked<Pick<Repository<Video>, 'update'>> {
   return { update: jest.fn().mockResolvedValue({ affected: 1 }) };
 }
 
-function makeStorageService(): jest.Mocked<Pick<StorageService, 'generatePresignedGetUrl' | 'uploadThumbnail'>> {
+function makeStorageService(): jest.Mocked<
+  Pick<StorageService, 'generatePresignedGetUrl' | 'uploadThumbnail'>
+> {
   return {
-    generatePresignedGetUrl: jest.fn().mockResolvedValue('https://minio/presigned-url'),
+    generatePresignedGetUrl: jest
+      .fn()
+      .mockResolvedValue('https://minio/presigned-url'),
     uploadThumbnail: jest.fn().mockResolvedValue(undefined),
   };
 }
 
-function makeFfmpegService(): jest.Mocked<Pick<FfmpegService, 'probe' | 'extractThumbnail'>> {
+function makeFfmpegService(): jest.Mocked<
+  Pick<FfmpegService, 'probe' | 'extractThumbnail'>
+> {
   return {
-    probe: jest.fn().mockResolvedValue({ durationSeconds: 6, width: 640, height: 360, codec: 'h264' }),
+    probe: jest.fn().mockResolvedValue({
+      durationSeconds: 6,
+      width: 640,
+      height: 360,
+      codec: 'h264',
+    }),
     extractThumbnail: jest.fn().mockResolvedValue(Buffer.alloc(1024, 0xff)),
   };
 }
@@ -166,7 +177,10 @@ describe('VideoProcessor (unit)', () => {
       expect(repo.update).toHaveBeenCalledTimes(1);
       expect(repo.update).toHaveBeenCalledWith(
         { id: 'test-video-uuid' },
-        { status: VideoStatus.ERROR, error_message: 'All 3 retries exhausted — corrupt file' },
+        {
+          status: VideoStatus.ERROR,
+          error_message: 'All 3 retries exhausted — corrupt file',
+        },
       );
     });
 

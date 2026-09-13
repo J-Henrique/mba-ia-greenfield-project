@@ -114,9 +114,9 @@ describe('StorageService (integration — MinIO)', () => {
       const list = await s3Client.send(
         new ListMultipartUploadsCommand({ Bucket: bucket }),
       );
-      expect(
-        (list.Uploads ?? []).some((u) => u.UploadId === uploadId),
-      ).toBe(false);
+      expect((list.Uploads ?? []).some((u) => u.UploadId === uploadId)).toBe(
+        false,
+      );
     });
   });
 

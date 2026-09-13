@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -114,5 +114,130 @@ export class VideosController {
     @Body() dto: CompleteUploadDto,
   ): Promise<void> {
     return this.videosService.completeUpload(user.sub, videoId, dto);
+  }
+
+  @Get(':id')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Get video metadata',
+    description:
+      'Returns video metadata, status, and a presigned thumbnail URL (if ready).',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Video metadata',
+    schema: {
+      properties: {
+        id: { type: 'string', format: 'uuid' },
+        title: { type: 'string', nullable: true },
+        description: { type: 'string', nullable: true },
+        status: { type: 'string', example: 'ready' },
+        durationSeconds: { type: 'number', nullable: true },
+        width: { type: 'number', nullable: true },
+        height: { type: 'number', nullable: true },
+        thumbnailUrl: { type: 'string', nullable: true },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden — video belongs to another channel',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async getById(@CurrentUser() user: JwtPayload, @Param('id') videoId: string) {
+    return this.videosService.getVideo(videoId, user.sub);
+  }
+
+  @Get(':id/stream')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Get stream URL',
+    description:
+      'Returns a presigned URL for video streaming (HTTP Range). Video must be ready.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Stream URL',
+    schema: {
+      properties: {
+        streamUrl: { type: 'string' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video not ready',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async stream(@CurrentUser() user: JwtPayload, @Param('id') videoId: string) {
+    return this.videosService.getStreamUrl(videoId, user.sub);
+  }
+
+  @Get(':id/download')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Get download URL',
+    description:
+      'Returns a presigned URL with Content-Disposition: attachment for downloading the video.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Download URL',
+    schema: {
+      properties: {
+        downloadUrl: { type: 'string' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video not ready',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async download(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') videoId: string,
+  ) {
+    return this.videosService.getDownloadUrl(videoId, user.sub);
   }
 }

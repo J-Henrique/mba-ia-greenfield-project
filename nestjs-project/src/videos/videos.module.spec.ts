@@ -17,7 +17,10 @@ describe('VideosModule', () => {
   it('should compile with TypeOrmModule.forFeature([Video]), ChannelsModule, and StorageModule', async () => {
     const module = await Test.createTestingModule({
       imports: [
-        ConfigModule.forRoot({ isGlobal: true, load: [storageConfig, queueConfig] }),
+        ConfigModule.forRoot({
+          isGlobal: true,
+          load: [storageConfig, queueConfig],
+        }),
         TypeOrmModule.forRoot(createTestDataSource(ALL_ENTITIES).options),
         VideosModule,
       ],
