@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 7/9 completed
+**SIs:** 8/9 completed
 
 ### SI-03.1 — Infra: dependências, config namespaces e Docker Compose
 - **Status:** completed
@@ -57,9 +57,14 @@
   - `CompleteUploadDto` com `@ValidateNested` + `@ArrayMinSize(1)`
 
 ### SI-03.7 — Video Worker (FFmpeg)
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 9 passing (7 unit processor + 2 integration ffmpeg service)
+- **Observations:**
+  - `FfmpegService` chamado via `child_process.execFile` (CLI puro, sem fluent-ffmpeg) — ffprobe para metadados, ffmpeg stdout pipe para thumbnail JPEG
+  - Worker é bootstrap separado via `NestFactory.createApplicationContext(WorkerModule)` — sem servidor HTTP, só consome fila BullMQ
+  - `@OnWorkerEvent('failed')` marca status ERROR quando as 3 tentativas se esgotam (TD-05)
+  - `Dockerfile.worker` com ffmpeg instalado; `Dockerfile.dev` também atualizado (testes precisam do binário)
+  - Testes unitários do processor mockam todas as dependências (7 cenários: happy path + 4 falhas + 2 onFailed) — roda em <1s sem infra real
 
 ### SI-03.8 — GET /videos/:id, /videos/:id/stream, /videos/:id/download
 - **Status:** pending

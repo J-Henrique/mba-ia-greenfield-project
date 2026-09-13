@@ -66,6 +66,7 @@ services:
       dockerfile: Dockerfile.worker
     volumes:
       - .:/home/node/app
+    command: npm run start:worker
     depends_on:
       db:
         condition: service_healthy
