@@ -9,6 +9,8 @@ import storageConfig from '../config/storage.config';
 import { envValidationSchema } from '../config/env.validation';
 import { QUEUE_NAME } from '../queue/queue.constants';
 import { StorageModule } from '../storage/storage.module';
+import { User } from '../users/entities/user.entity';
+import { Channel } from '../channels/entities/channel.entity';
 import { Video } from '../videos/entities/video.entity';
 import { FfmpegService } from './ffmpeg.service';
 import { VideoProcessor } from './video.processor';
@@ -35,7 +37,7 @@ import { VideoProcessor } from './video.processor';
         synchronize: false,
       }),
     }),
-    TypeOrmModule.forFeature([Video]),
+    TypeOrmModule.forFeature([User, Channel, Video]),
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [queueConfig.KEY],
